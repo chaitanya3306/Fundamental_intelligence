@@ -1,80 +1,80 @@
-
-from src.database.session import SessionLocal
-from sqlalchemy.orm import Session
-from src.database.models import FinancialStatement
-from src.financial_analysis.mapping import METRIC_MAP
-
-
-def get_metric_value(db:Session,company_id:int,year:int,standard_key:str):
-
-    # now we have to get all the possible names for this metric from the map
-    possible_names=METRIC_MAP.get(standard_key,[])
-    # loop through all possible names until we found one in db
-    for name in possible_names:
-        result=db.query(FinancialStatement).filter(
-            FinancialStatement.company_id==company_id,
-            FinancialStatement.year==year,
-            FinancialStatement.metric_name==name
-        ).first()
-        if result is not None:
-            return result.value
-    return 0.0
+import pandas as pd
+import logging
+from typing import List, Dict, Any
+from datetime import date
 
 
+from ..database.session import db_manager
+from ..database.models import FinancialStatement, Company
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class FinancialMetrics:
+    def __init__(self):
+        self.db=db_manager
+
+    def calculate_yoy_growth(self,current_val:float,previous_val:float)->float:
+        if previous_val==0.0 or previous_val<0.0:
+            logger.warning(f"Undefined YoY Growth: Previous value is {previous_val}")
+            return float('nan')
+
+        yoy_growth=((current_val-previous_val)/previous_val)*100
+
+        return yoy_growth
+
+    def calculate_cagr(self,beginning_val:float,ending_val:float,periods:int)->float:
+
+        if beginning_val <= 0 or ending_val <= 0 or periods <= 0:
+            logger.warning(f"Undefined CAGR: Beg={beginning_val}, End={ending_val}, P={periods}")
+            return float('nan')
 
 
-def get_ratios(db:Session,company_id:int,year:int):
-    # Step 1: Fetch all required metrics once
-    metrics = {
-        "Net Income": get_metric_value(db, company_id, year, "net_income"),
-        "Total Revenue": get_metric_value(db, company_id, year, "revenue"),
-        "Stockholders Equity": get_metric_value(db, company_id, year, "equity"),
-        "Total Assets": get_metric_value(db, company_id, year, "total_assets"),
-        "Total Debt": get_metric_value(db, company_id, year, "total_debt"),
-    }
+        cagr = ((ending_val / beginning_val) ** (1 / periods)) - 1
+        return cagr
 
-    # Step 2: Define calculation map
-    calculation_map = {
-        "Net_Profit_Margin": lambda m: None if m["Total Revenue"] == 0 else m["Net Income"] / m["Total Revenue"],
-        "ROE": lambda m: None if m["Stockholders Equity"] == 0 else m["Net Income"] / m["Stockholders Equity"],
-        "Debt_to_Equity": lambda m: None if m["Stockholders Equity"] == 0 else m["Total Debt"] / m[
-            "Stockholders Equity"],
-        "Asset_Turnover": lambda m: None if m["Total Assets"] == 0 else m["Total Revenue"] / m["Total Assets"],
-    }
+    def get_metric_series(self,symbol:str,metric_name:str)->pd.Series:
+        try:
+            session=self.db.get_session()
+            results=session.query(FinancialStatement).join(Company)\
+            .filter(Company.ticker==symbol).filter(FinancialStatement.metric_name==metric_name)\
+            .all()
 
-    # step 3 : calcualte ratios
-    ratios={name:func(metrics) for name,func in calculation_map.items()}
-    return ratios
+            data={r.date:r.value for r in results}
+            series=pd.Series(data)
+            series.index=pd.to_datetime(series.index)
+            return series
 
+        except Exception as e:
+            logger.error(f"Error Fetching Series For {symbol}:{metric_name} :{e}")
+            return pd.Series(dtype=float)
+        finally:
+            session.close()
 
+    def get_growth_report(self,symbol:str):
+        report={}
+        target_metrics = ["Total Revenue", "Net Income", "EBITDA"]
+        for metric in target_metrics:
+            series=self.get_metric_series(symbol,metric)
 
+            if len(series)<2:
+                report[metric]={"error":"not enough data points"}
 
-def calculate_growth(db:Session,company_id:int,metric_key:str,start_year:int,end_year:int):
-    val_start=get_metric_value(db,company_id,start_year,metric_key)
-    val_end=get_metric_value(db,company_id,end_year,metric_key)
+            current_val=series.iloc[-1]
+            previous_val=series.iloc[-2]
+            beginning_val=series.iloc[0]
+            periods=len(series)-1
 
-    n=end_year-start_year
-
-    if val_start<=0 or n<=0:
-        return None
-
-
-#   calcualte the CAGR:
-    CAGR=(val_end/val_start)**(1/n)-1
-
-    return CAGR
-
-
-
+            report[metric]={
+                "current_value":current_val,
+                "yoy_growth":self.calculate_yoy_growth(current_val,previous_val),
+                "cagr":self.calculate_cagr(beginning_val,current_val,periods)
+            }
+        return report
 
 if __name__=="__main__":
-    db=SessionLocal()
-    try:
-        print(get_ratios(db,1,2026))
-        print("\n")
-        print(calculate_growth(db,1,"revenue",2024,2026))
-    except Exception as e:
-        print(f"bug founded as : {e}")
-    finally:
-        db.close()
+    metrics=FinancialMetrics()
+    symbol="TCS.NS"
+    report=metrics.get_growth_report(symbol)
+    print(f"Growth Report For {symbol}: \n {report}")
 

@@ -28,4 +28,11 @@ METRIC_MAP = {
         "Long Term Debt",
         "Current Debt"
     ],
+    "operating_cf": [
+    "Operating Cash Flow"
+
+    ],
+    "receivables":[
+        "Accounts Receivable"
+    ]
 }

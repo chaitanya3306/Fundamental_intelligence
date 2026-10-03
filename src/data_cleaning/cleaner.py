@@ -1,60 +1,78 @@
 import pandas as pd
 import os
+import logging
 
-# --- CONFIGURATION ---
-# Maintaining consistency with the project's path management
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SILVER_DATA_DIR = os.path.join(BASE_DIR, "data", "silver")
+from typing import List
 
-def clean_financial_df(df, ticker, file_name):
-    """
-    Silver Layer Processing:
-    Transforms raw Bronze data into cleaned, standardized data.
-    """
-    print(f"Cleaning {file_name} for {ticker}...")
 
-    # 1. Copy the dataframe to avoid modifying the original (Immutability)
-    cleaned_df = df.copy()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-    # 2. Handle Missing Values (Imputation)
-    # In finance, a NaN often means the value is effectively 0.
-    # We use fillna(0) to ensure mathematical operations don't crash.
-    cleaned_df = cleaned_df.fillna(0)
 
-    # 3. Type Casting (Standardization)
-    # We ensure all columns are numeric.
-    # errors='coerce' turns unparseable strings into NaN, which we then fill with 0.
-    cleaned_df = cleaned_df.apply(lambda col: pd.to_numeric(col, errors='coerce')).fillna(0)
+class FinancialCleaner:
+    def __init__(self,raw_dir:str="data/raw",silver_dir:str="data/silver"):
+        self.raw_dir=raw_dir
+        self.silver_dir=silver_dir
+        os.makedirs(silver_dir)
 
-    # 4. The Silver Save
-    # We save to a separate directory to keep our 'Bronze' (raw) data untouched.
-    ticker_folder = os.path.join(SILVER_DATA_DIR, ticker)
-    os.makedirs(ticker_folder, exist_ok=True)
+    def _transpose_and_clean(self,df:pd.DataFrame)->pd.DataFrame:
+        #in this we just transpose and clean the missing values
+        df=df.T
 
-    file_path = os.path.join(ticker_folder, file_name)
-    cleaned_df.to_csv(file_path, index=True)
+        df.index=pd.to_datetime(df.index)
+        df.index.name='date'
 
-    return cleaned_df
+        df=df.fillna(0.0)
 
-if __name__ == "__main__":
+        return df
 
-    # Sample: Use TCS balance sheet from Bronze layer
-    try:
-        # Path to bronze file
-        # Note: In a real pipeline, this path would be passed by the orchestrator
-        sample_path = os.path.join(BASE_DIR, "data", "raw", "TCS.NS", "balance_sheet.csv")
+    def process_company(self,symbol:str)->bool:
+        try:
+            logger.info(f"processing {symbol}")
 
-        if os.path.exists(sample_path):
-            raw_df = pd.read_csv(sample_path, index_col=0)
-            cleaned_df = clean_financial_df(raw_df, "TCS.NS", "balance_sheet.csv")
+            statements=["income_statement","balance_sheet","cashflow"]
 
-            print("\n✅ Cleaning Successful!")
-            print("Raw Data Sample (with NaNs potentially):")
-            print(raw_df.head(3))
-            print("\nCleaned Data Sample (No NaNs, all numeric):")
-            print(cleaned_df.head(3))
-        else:
-            print("Sample bronze file not found. Please run fetch_basics.py first.")
+            company_silver_dir=os.path.join(self.silver_dir,symbol)
+            os.makedirs(company_silver_dir)
+            for stm in statements:
+                file_path=os.path.join(self.raw_dir,symbol,f"{stm}.csv")
 
-    except Exception as e:
-        print(f"Error during cleaning test: {e}")
+                if not os.path.exists(file_path):
+                    logger.warning(f"file not found : {file_path}")
+
+                df_raw=pd.read_csv(file_path,index_col=0)
+                df_clean=self._transpose_and_clean(df_raw)
+
+                save_path=os.path.join(company_silver_dir,f"{stm}.csv")
+                df_clean.to_csv(save_path)
+
+            return True
+        except Exception as e:
+            logger.error(f"symbol not found or error in it : {symbol} : {e}")
+            return False
+
+    def clean_batch(self,company_list:List[str])->List[str]:
+        failed=[]
+        for symbol in company_list:
+            if not self.process_company(symbol):
+                failed.append(symbol)
+        return failed
+
+
+if __name__=="__main__":
+    COMPANIES = ['TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'RELIANCE.NS']
+    cleaner=FinancialCleaner()
+
+    failed=cleaner.clean_batch(COMPANIES)
+
+    if failed:
+        logger.warning(f"cleaning  failed for  {failed}")
+    logger.info("All companies Cleaned Successfully")
+
+
+
+
+
+
+
+

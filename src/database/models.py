@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, nulls_last
+from sqlalchemy import Column,Date, Integer, String, Float, ForeignKey, nulls_last
 from sqlalchemy.orm import declarative_base, relationship
 
 Base=declarative_base()
@@ -8,7 +8,7 @@ Base=declarative_base()
 class Company(Base):
     __tablename__="companies"
     company_id=Column(Integer,primary_key=True,autoincrement=True)
-    ticker=Column(String,unique=True,nullable=False)
+    ticker=Column(String,unique=True,nullable=False,index=True)
     sector = Column(String) # e.g., "IT Services"
     industry = Column(String) # e.g., "Software"
 
@@ -21,7 +21,8 @@ class FinancialStatement(Base):
     __tablename__ = 'financial_statements'
     statement_id=Column(Integer,primary_key=True,autoincrement=True)
     company_id=Column(Integer,ForeignKey('companies.company_id'))
-    year=Column(Integer,nullable=False)
+    date=Column(Date,nullable=False,index=True)
+    statement_type=Column(String,nullable=False)
     metric_name=Column(String,nullable=False)
     value=Column(Float,nullable=False)
 

@@ -1,65 +1,118 @@
 import yfinance as yf
 import os
 import pandas as pd
+import logging
+from typing import List,Optional
 
-# --- CONFIGURATION ---
-# We define the base path once. This prevents "Path Fragility".
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 
-def get_ticker_path(ticker_symbol):
-    """Returns the absolute path to a ticker's raw data folder."""
-    folder_path = os.path.join(RAW_DATA_DIR, ticker_symbol)
-    os.makedirs(folder_path, exist_ok=True)
-    return folder_path
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-def fetch_and_save(ticker_obj, attribute_name, ticker_symbol):
-    """
-    Helper to handle the Bronze Layer logic:
-    Check Disk -> If missing, Fetch from API -> Save to Disk.
-    """
-    file_path = os.path.join(get_ticker_path(ticker_symbol), f"{attribute_name}.csv")
+class YFinanceFetcher:
+    def __init__(self,data_dir:str="data/raw"):
+        self.data_dir=data_dir
+        os.makedirs(self.data_dir,exist_ok=True)
 
-    if os.path.exists(file_path):
-        # index_col=0 ensures the date/index is restored correctly
-        return pd.read_csv(file_path, index_col=0)
+    def _save_dataframe(self,df:pd.DataFrame,symbol:str,statement_name:str):
+        folder_path=os.path.join(self.data_dir,symbol)
+        os.makedirs(folder_path,exist_ok=True)
 
-    # Fetch from API
-    data = getattr(ticker_obj, attribute_name)
-    # index=True is used because financial data indices (dates) are critical
-    data.to_csv(file_path, index=True)
-    return data
+        #now create the filepath in that folder
+        file_path=os.path.join(folder_path,f"{statement_name}.csv")
 
-def get_financial_info(ticker_list):
-    financials = {}
-    for tick in ticker_list:
         try:
-            # We only create the Ticker object once per company
-            ticker_obj = yf.Ticker(tick)
+            df.to_csv(file_path)
+            logger.info(f"file {file_path} created for {symbol}")
+        except Exception as e:
+            logger.error(
+                f"Disk Error : could not save the {statement_name} of {symbol} : {e}"
+            )
 
-            company_info = {
-                "income_statement": fetch_and_save(ticker_obj, "financials", tick),
-                "cashflow": fetch_and_save(ticker_obj, "cashflow", tick),
-                "balance_sheet": fetch_and_save(ticker_obj, "balance_sheet", tick),
+    def fetch_company_data(self,symbol):
+        try:
+            logger.info(f"fetching for {symbol}")
+            ticker=yf.Ticker(symbol)
+
+            statemets={
+                "income_statement":ticker.financials,
+                "balance_sheet":ticker.balance_sheet,
+                "cashflow":ticker.cashflow
             }
-            financials[tick] = company_info
-            print(f"Successfully processed {tick}")
+
+            for name,df in statemets.items():
+                if df is not None and not df.empty:
+                    self._save_dataframe(df,symbol,name)
+                else:
+                    logger.warning(f"{name} for {symbol} is not fetched")
+            return True
 
         except Exception as e:
-            print(f"Critical error processing {tick}: {e}")
-            continue
+            logger.error(f"API error : failed to fetch {symbol}:{e}")
+            return False
 
-    return financials
+    def download_batch(self,symbols:List[str])->List[str]:
+        failed_symbols=[]
+        for symbol in symbols:
+            success=self.fetch_company_data(symbol)
+            if not success:
+                failed_symbols.append(symbol)
+        return failed_symbols
 
-if __name__ == "__main__":
-    ticker_list = ["TCS.NS", "RELIANCE.NS", "INFY.NS",
-                   "HDFCBANK.NS", "ICICIBANK.NS"]
 
-    # This now handles both saving and loading automatically (Caching)
-    financials = get_financial_info(ticker_list)
+if __name__=="__main__":
+    COMPANIES = ['TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'RELIANCE.NS', 'TATAMOTORS.NS']
 
-    if "TCS.NS" in financials:
-        print("\n--- TCS Income Statement (First 5 rows) ---")
-        print(financials["TCS.NS"]["income_statement"].head())
+    fetcher=YFinanceFetcher()
+    failuers=fetcher.download_batch(COMPANIES)
+
+    if not failuers:
+        logger.info("Success ALL data Fetched !!")
     else:
-        print("TCS data not found.")
+        logger.warning(f"Completed with errors . Failed symbols : {failuers}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

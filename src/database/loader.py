@@ -1,92 +1,121 @@
-import os
+
 import pandas as pd
-from jinja2.filters import select_or_reject
-from sqlalchemy.orm import Session
-from src.database.session import SessionLocal
-from src.database.models import Company,FinancialStatement
+import logging
+import os
+from typing import List
+from datetime import datetime
 
 
-# --config---
 
-# getting base_dir
+from .session import db_manager
+from .models import Company, FinancialStatement
 
-BASE_DIR=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SILVER_DATA_DIR=os.path.join(BASE_DIR,"data","silver")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def get_or_create_company(db:Session,ticker:str):
-    # ensure if company exists in the company table
-    company=db.query(Company).filter(Company.ticker==ticker).first()
-    if company:
+
+class DatabaseLoader:
+
+    def __init__(self,silver_dir:str="data/silver"):
+        self.silver_dir=silver_dir
+
+    def _get_or_create_company(self,session,symbol:str)->int:
+        company=session.query(Company).filter(Company.ticker==symbol).first()
+        if not company:
+            logger.info(f"adding {symbol} company")
+            company=Company(ticker=symbol)
+            session.add(company)
+            session.flush()
+
         return company.company_id
-    # if not found then create a new:
-    print(f"creating new company record for {ticker}.....")
-    new_company=Company(ticker=ticker,
-                        sector="Unknown",
-                        industry="Unknown")
-    db.add(new_company)
-    db.commit()
-    db.refresh(new_company)
-
-    return new_company.company_id
-def load_csv_to_db(db:Session,ticker:str,filename:str,company_id:int):
-#     this function loads single Silver.csv transforms it from
-#     WIDE to LONG and saves to DB
-
-#     first lets do load the df
-
-    filepath=os.path.join(SILVER_DATA_DIR,ticker,filename)
-    if not os.path.exists(filepath):
-        return
-
-    df=pd.read_csv(filepath,index_col=0)
-
-#   now lets transform it to long
-    df_reset=df.reset_index()
-    metric_col_name=df_reset.columns[0]
-    long_df=df_reset.melt(
-        id_vars=[metric_col_name],
-        var_name="year",
-        value_name="value"
-    )
-    print(f"inserting {filename} data......")
-    for _,row in long_df.iterrows():
-#         create the statement
-        statement =FinancialStatement(
-            company_id=company_id,
-            year=int(str(row['year'])[:4]),
-            metric_name=row[metric_col_name],
-            value=float(row['value'])
-        )
-        db.add(statement)
-
-def run_loader(ticker_list):
-    db=SessionLocal()
-    try:
-        for tick in ticker_list:
-            company_id=get_or_create_company(db,tick)
-    #       get tick folder
-            ticker_folder=os.path.join(SILVER_DATA_DIR,tick)
-            if not os.path.exists(ticker_folder):
-                continue
-            for file in os.listdir(ticker_folder):
-                if file.endswith(".csv"):
-                    load_csv_to_db(db,tick,file,company_id)
-            db.commit()
-    except Exception as e:
-        print(f"critical exception occurs while loading : {e} ")
-        db.rollback()
-    finally:
-        db.close()
-
-if __name__=="__main__":
-    TARGET_TICKERS= ["TCS.NS", "RELIANCE.NS", "INFY.NS",
-                   "HDFCBANK.NS", "ICICIBANK.NS"]
 
 
-    run_loader(TARGET_TICKERS)
+
+    def _upsert_statement(self, session, company_id: int, statement_type: str, report_date, metric_name: str, value: float):
+        """
+        The Upsert Logic: Check if record exists.
+        If yes -> Update. If no -> Insert.
+        """
+        # Search for an existing record with the same company, date, statement, and metric
+        existing_entry = session.query(FinancialStatement).filter(
+            FinancialStatement.company_id == company_id,
+            FinancialStatement.date == report_date,
+            FinancialStatement.statement_type == statement_type,
+            FinancialStatement.metric_name == metric_name
+        ).first()
+
+        if existing_entry:
+            # UPDATE existing record
+            existing_entry.value = value
+        else:
+            # INSERT new record
+            entry = FinancialStatement(
+                company_id=company_id,
+                date=report_date,
+                statement_type=statement_type,
+                metric_name=metric_name,
+                value=value
+            )
+            session.add(entry)
 
 
 
 
 
 
+    def _load_statement(self,session,df:pd.DataFrame,company_id:int,statement_type:str):
+        for date,row in df.iterrows():
+            report_date = pd.to_datetime(date).date()
+
+            for metric_name,value in row.items():
+                #create the entry:
+                self._upsert_statement(session, company_id, statement_type, report_date,
+                                       metric_name, float(value))
+    def _load_company_data(self,symbol):
+        #handle the company
+        session=db_manager.get_session()
+        try:
+            company_id=self._get_or_create_company(session,symbol)
+
+            statements = ["income_statement", "balance_sheet", "cashflow"]
+
+            for stm in statements:
+                file_path=os.path.join(self.silver_dir,symbol,f"{stm}.csv")
+
+                if os.path.exists(file_path):
+
+                    df=pd.read_csv(file_path,index_col=0)
+
+                    self._load_statement(session,df,company_id,stm)
+                else:
+                    logger.warning(f"silver file missing {symbol}:{stm} ")
+
+            session.commit()
+            logger.info(f"Successfully loaded all data for {symbol} into DB")
+            return True
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Database load error {symbol}:{e}")
+            return False
+        finally:
+            session.close()
+
+    def load_batch(self,company_list:List[str]):
+        failed=[]
+        for symbol in company_list:
+            if not self._load_company_data(symbol):
+                failed.append(symbol)
+        return failed
+
+
+if __name__ == "__main__":
+    COMPANIES = ['TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'RELIANCE.NS']
+
+    loader = DatabaseLoader()
+    failures = loader.load_batch(COMPANIES)
+
+    if not failures:
+        logger.info("🚀 All data successfully moved to Gold Layer (Postgres)!")
+    else:
+        logger.warning(f"Load failed for: {failures}")

@@ -1,45 +1,53 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker,Session
 from src.database.models import Base
-
-DB_URL = "postgresql://postgres:chaitanya@localhost:5432/fundamental_intelligence"
-
-engine=create_engine(DB_URL) # this is the actual connection to the database
-
-# sessionmaker is the factory that creates new sessions with database
-SessionLocal=sessionmaker(autocommit=False,autoflush=False,bind=engine)
-
-def init_db():
-    # this function creates all the tables in the database based on your modesl
-    Base.metadata.create_all(bind=engine)
-    print("database tables are created successfully")
-
-#this is the helper function to open the database session and close it when done
-def get_db():
-    db=SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+from dotenv import load_dotenv
+import os
 
 
+load_dotenv()
+
+class DatabaseSession:
+
+    def __init__(self):
+        # Get the URL from .env
+        self.db_url = os.getenv("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError("DATABASE_URL not found in .env file")
+
+        # The Engine is the actual connection to the DB
+        self.engine = create_engine(self.db_url)
+
+        # The sessionmaker is the 'factory' that creates sessions
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            autocommit=False,
+            autoflush=False
+        )
+
+    def create_tables(self):
+        """Creates all tables defined in models.py if they don't exist."""
+        try:
+            Base.metadata.create_all(bind=self.engine)
+            print("✅ Database tables created successfully!")
+        except Exception as e:
+            print(f"❌ Error creating tables: {e}")
+
+    def get_session(self) -> Session:
+        """Returns a new database session."""
+        return self.SessionLocal()
 
 
 
-if __name__ == "__main__":
-    init_db()
+db_manager=DatabaseSession()
 
 
 
 
 
 
-
-
-
-
-
-
+if __name__=="__main__":
+    db_manager.create_tables()
 
 
 
