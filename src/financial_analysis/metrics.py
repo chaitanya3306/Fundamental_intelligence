@@ -38,7 +38,7 @@ class FinancialMetrics:
             session=self.db.get_session()
             results=session.query(FinancialStatement).join(Company)\
             .filter(Company.ticker==symbol).filter(FinancialStatement.metric_name==metric_name)\
-            .all()
+            .order_by(FinancialStatement.date.asc()).all()
 
             data={r.date:r.value for r in results}
             series=pd.Series(data)
