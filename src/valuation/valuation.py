@@ -88,7 +88,18 @@ class ValuationEngine:
 
         shares = self._data.get_shares_outstanding(symbol)
         if pd.isna(shares):
-            return {"error": "sharesOutstanding unavailable"}
+            logger.warning(f"Shares Outstanding unavailable for {symbol}; DCF cannot be computed")
+            # Return placeholder with None values instead of an error
+            return {
+                "intrinsic_value": None,
+                "enterprise,value": None,
+                "assumptions": {
+                    "growth_rate": growth_rate,
+                    "discount_rate": discount_rate,
+                    "terminal_growth": terminal_growth,
+                },
+                "warning": "sharesOutstanding unavailable"
+            }
 
         session = self.db.get_session()
         try:
