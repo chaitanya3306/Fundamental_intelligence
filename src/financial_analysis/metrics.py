@@ -57,18 +57,19 @@ class FinancialMetrics:
         for metric in target_metrics:
             series=self.get_metric_series(symbol,metric)
 
-            if len(series)<2:
-                report[metric]={"error":"not enough data points"}
+            if len(series) < 2:
+                report[metric] = {"error":"not enough data points"}
+                continue
 
-            current_val=series.iloc[-1]
-            previous_val=series.iloc[-2]
-            beginning_val=series.iloc[0]
-            periods=len(series)-1
+            current_val = series.iloc[-1]
+            previous_val = series.iloc[-2]
+            beginning_val = series.iloc[0]
+            periods = len(series) - 1
 
-            report[metric]={
-                "current_value":current_val,
-                "yoy_growth":self.calculate_yoy_growth(current_val,previous_val),
-                "cagr":self.calculate_cagr(beginning_val,current_val,periods)
+            report[metric] = {
+                "current_value": current_val,
+                "yoy_growth": self.calculate_yoy_growth(current_val, previous_val),
+                "cagr": self.calculate_cagr(beginning_val, current_val, periods)
             }
         return report
 
@@ -77,4 +78,3 @@ if __name__=="__main__":
     symbol="TCS.NS"
     report=metrics.get_growth_report(symbol)
     print(f"Growth Report For {symbol}: \n {report}")
-
