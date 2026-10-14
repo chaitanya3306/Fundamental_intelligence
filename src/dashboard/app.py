@@ -84,7 +84,9 @@ if symbol:
         col2.metric("Net Profit", format_crores(ni.get('current_value')), f"{ni.get('yoy_growth', 0):.2f}%")
 
         # P/E Ratio
-        col3.metric("P/E Ratio", f"{valuation.get('P/E_Ratio', 'N/A'):.2f}")
+        pe_ratio = valuation.get('P/E_Ratio')
+        pe_display = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
+        col3.metric("P/E Ratio", pe_display)
 
         # Intrinsic Value
         intrinsic_val = intrinsic.get('intrinsic_value', 0)
