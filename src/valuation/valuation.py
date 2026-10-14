@@ -4,13 +4,12 @@ import logging
 import os
 from dotenv import load_dotenv
 
-from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
 from ..database.session import db_manager
 from ..database.models import Company, FinancialStatement
-
+from src.config.api_data import CurrentData
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,25 +18,26 @@ logger = logging.getLogger(__name__)
 class ValuationEngine:
     def __init__(self):
         self.db = db_manager
-        self.CACHE_AGE_DAYS = 1
-        # Symbol mapping for APIs that use different identifiers – kept here for backward compatibility
-        self.symbol_map = {
-            "TATAMOTORS": "TMPV"
-        }
+        self._data=CurrentData()
+
 
     def calculate_relative_valuation(self, symbol: str):
         """Calculate basic relative valuation metrics for the given *symbol*.
 
-        Returns a dictionary containing ``current_price`` (or ``None`` if unavailable) and
-        optionally ``P/E_Ratio`` and ``P/B_Ratio`` when the required financial statements are present and a valid price is available.
+        Returns a dictionary containing ``current_price`` (or ``None`` if unavailable) and, when possible, ``P/E_Ratio`` and ``P/B_Ratio``. If the share count or price is missing, those ratios are omitted but ``current_price`` is still returned.
         """
-        # Import the data‑access helpers – they encapsulate all API calls and caching.
-        from src.config.api_data import get_current_price, get_shares_outstanding
 
-        price = get_current_price(symbol)
-        shares_outstanding = get_shares_outstanding(symbol)
-        if pd.isna(shares_outstanding):
-            return {"error": "sharesOutstanding unavailable"}
+        price = self._data.get_current_price(symbol)
+        shares_outstanding = self._data.get_shares_outstanding(symbol)
+        shares_valid = not pd.isna(shares_outstanding)
+        price_valid = not pd.isna(price)
+
+        # Base result always includes the current price (or None)
+        results = {"current_price": None if pd.isna(price) else price}
+
+        # Include shares if available (useful for callers that may need it)
+        if shares_valid:
+            results["shares_outstanding"] = shares_outstanding
 
         session = self.db.get_session()
         try:
@@ -59,11 +59,9 @@ class ValuationEngine:
                 .first()
             )
 
-            results = {"current_price": None if pd.isna(price) else price}
-
-            if not pd.isna(price) and last_net_income:
+            if price_valid and shares_valid and last_net_income:
                 results['P/E_Ratio'] = price / (last_net_income.value / shares_outstanding)
-            if not pd.isna(price) and last_equity:
+            if price_valid and shares_valid and last_equity:
                 results['P/B_Ratio'] = price / (last_equity.value / shares_outstanding)
 
             return results
@@ -87,9 +85,8 @@ class ValuationEngine:
         if discount_rate <= terminal_growth:
             raise ValueError("discount_rate must be greater than terminal_growth to avoid division by zero")
 
-        from src.config.api_data import get_shares_outstanding
 
-        shares = get_shares_outstanding(symbol)
+        shares = self._data.get_shares_outstanding(symbol)
         if pd.isna(shares):
             return {"error": "sharesOutstanding unavailable"}
 
