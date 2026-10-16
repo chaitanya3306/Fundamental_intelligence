@@ -99,10 +99,17 @@ if symbol:
     intrinsic_val = intrinsic.get('intrinsic_value')
     intrinsic_display = f"₹{intrinsic_val:,.2f}" if intrinsic_val is not None else "N/A"
     current_price = valuation.get('current_price')
+    # Show any warning returned from the intrinsic endpoint (e.g., shares missing)
+    intrinsic_warning = intrinsic.get('warning')
+    if intrinsic_warning:
+        st.warning(intrinsic_warning)
     if current_price is None:
+        st.warning("Current price unavailable")
         status = "⚠️ Price N/A"
+    elif intrinsic_val is None:
+        status = "⚠️ Intrinsic N/A"
     else:
-        status = "🟢 Undervalued" if (intrinsic_val or 0) > current_price else "🔴 Overvalued"
+        status = "🟢 Undervalued" if intrinsic_val > current_price else "🔴 Overvalued"
     col4.metric("Intrinsic Value", intrinsic_display, status)
 
     # --- SECTION 2: RISK AUDIT ---
