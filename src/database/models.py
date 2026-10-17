@@ -1,6 +1,6 @@
-from sqlalchemy import Column,Date, Integer, String, Float, ForeignKey, nulls_last
+from sqlalchemy import Column,Date, Integer, String, Float, ForeignKey, nulls_last,DateTime
 from sqlalchemy.orm import declarative_base, relationship
-
+from datetime import datetime
 Base=declarative_base()
 
 
@@ -11,6 +11,9 @@ class Company(Base):
     ticker=Column(String,unique=True,nullable=False,index=True)
     sector = Column(String) # e.g., "IT Services"
     industry = Column(String) # e.g., "Software"
+    shares_outstanding=Column(Float,nullable=True)
+    current_price=Column(Float,nullable=True)
+    last_updated = Column(DateTime, default=datetime.now(), onupdate=datetime.utcnow, nullable=False)
 
     #relationships:
     # this allow us to get the data from another table in pythonic way like company.statements

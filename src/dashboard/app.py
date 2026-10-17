@@ -16,13 +16,10 @@ def fetch_api_data(endpoint, symbol, params=None):
     try:
         url = f"http://127.0.0.1:8000/{endpoint}/{symbol}"
         if params:
-            # This adds ?growth=0.1&discount=0.12 to the URL
             query_string = "&".join([f"{k}={v}" for k, v in params.items()])
             url += f"?{query_string}"
-
         response = requests.get(url)
         data = response.json()
-
         if "error" in data:
             return None, data["error"]
         return data, None
@@ -30,10 +27,11 @@ def fetch_api_data(endpoint, symbol, params=None):
         return None, str(e)
 
 
-def format_crores(value):
-    """Converts raw numbers to readable Crores."""
-    if value is None or pd.isna(value): return "N/A"
-    return f"₹{value / 10_000_000:,.2f} Cr"
+def format_usd(value):
+    """Format a numeric value as US dollars (no Indian Crores)."""
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"${value:,.2f}"
 
 
 # --- UI LAYOUT ---
@@ -41,12 +39,12 @@ def format_crores(value):
 # SIDEBAR: Control Panel
 st.sidebar.title("⚙️ Control Panel")
 
-# Define supported tickers without extensions
-TICKER_OPTIONS = ["TCS", "INFY", "RELIANCE", "HDFCBANK", "TATAMOTORS"]
+# Define supported US tickers (you can edit this list as needed)
+TICKER_OPTIONS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA"]
 selected_ticker = st.sidebar.selectbox("Select Company Ticker", options=TICKER_OPTIONS)
 
-# Append .NS for the backend API calls
-symbol = f"{selected_ticker}.NS"
+# No market suffix is added – the backend expects a plain US ticker.
+symbol = selected_ticker
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("DCF Assumptions")
@@ -65,13 +63,11 @@ if symbol:
     dcf_params = {"growth": growth_rate, "discount": discount_rate, "terminal_growth": term_growth}
     intrinsic, i_err = fetch_api_data("intrinsic", symbol, params=dcf_params)
 
-    # Ensure we always have a dict to work with
     metrics = metrics or {}
     risks = risks or {}
     valuation = valuation or {}
     intrinsic = intrinsic or {}
 
-    # Gather any errors to surface to the user
     errors = [e for e in (m_err, r_err, v_err, i_err) if e]
     if errors:
         st.error(f"⚠️ API Error: {'; '.join(errors)}")
@@ -80,29 +76,21 @@ if symbol:
     st.subheader("📌 Key Financials")
     col1, col2, col3, col4 = st.columns(4)
 
-    # Revenue KPI
     rev = metrics.get('Total Revenue', {})
-    col1.metric("Total Revenue", format_crores(rev.get('current_value')),
+    col1.metric("Total Revenue", format_usd(rev.get('current_value')),
                  f"{rev.get('yoy_growth', 0):.2f}%")
 
-    # Net Income KPI
     ni = metrics.get('Net Income', {})
-    col2.metric("Net Profit", format_crores(ni.get('current_value')),
+    col2.metric("Net Profit", format_usd(ni.get('current_value')),
                  f"{ni.get('yoy_growth', 0):.2f}%")
 
-    # P/E Ratio
     pe_ratio = valuation.get('P/E_Ratio')
     pe_display = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
     col3.metric("P/E Ratio", pe_display)
 
-    # Intrinsic Value
     intrinsic_val = intrinsic.get('intrinsic_value')
-    intrinsic_display = f"₹{intrinsic_val:,.2f}" if intrinsic_val is not None else "N/A"
+    intrinsic_display = format_usd(intrinsic_val) if intrinsic_val is not None else "N/A"
     current_price = valuation.get('current_price')
-    # Show any warning returned from the intrinsic endpoint (e.g., shares missing)
-    intrinsic_warning = intrinsic.get('warning')
-    if intrinsic_warning:
-        st.warning(intrinsic_warning)
     if current_price is None:
         st.warning("Current price unavailable")
         status = "⚠️ Price N/A"
@@ -134,6 +122,5 @@ if symbol:
     with val_col2:
         st.write("**DCF Assumptions**")
         st.write(f"Growth: {growth_rate * 100}% | Discount: {discount_rate * 100}%")
-
 else:
-    st.info("Please enter a company symbol in the sidebar to begin.")
+    st.info("Please select a company ticker in the sidebar to begin.")

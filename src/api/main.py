@@ -18,7 +18,8 @@ async  def root():
 
 @app.get("/metrics/{symbol}")
 async def get_financial_metrics(symbol:str):
-    return  metrics_engine.get_growth_report(symbol)
+    res = metrics_engine.get_growth_report(symbol)
+    return clean_nan(res)
 
 @app.get("/risks/{symbol}")
 async def get_risk_audit(symbol:str):

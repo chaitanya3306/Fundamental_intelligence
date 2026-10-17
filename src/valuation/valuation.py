@@ -4,22 +4,22 @@ import logging
 import os
 from dotenv import load_dotenv
 
-
 import pandas as pd
 
 from ..database.session import db_manager
 from ..database.models import Company, FinancialStatement
 from src.config.api_data import CurrentData
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 class ValuationEngine:
     def __init__(self):
         self.db = db_manager
-        self._data=CurrentData()
-
+        self._data = CurrentData()
 
     def calculate_relative_valuation(self, symbol: str):
         """Calculate basic relative valuation metrics for the given *symbol*.
@@ -85,14 +85,13 @@ class ValuationEngine:
         if discount_rate <= terminal_growth:
             raise ValueError("discount_rate must be greater than terminal_growth to avoid division by zero")
 
-
         shares = self._data.get_shares_outstanding(symbol)
         if pd.isna(shares):
             logger.warning(f"Shares Outstanding unavailable for {symbol}; DCF cannot be computed")
             # Return placeholder with None values instead of an error
             return {
                 "intrinsic_value": None,
-                "enterprise,value": None,
+                "enterprise_value": None,  # Fixed typo (was "enterprise,value")
                 "assumptions": {
                     "growth_rate": growth_rate,
                     "discount_rate": discount_rate,
@@ -134,7 +133,7 @@ class ValuationEngine:
 
             return {
                 "intrinsic_value": intrinsic_value_per_share,
-                "enterprise,value": enterprise_value,
+                "enterprise_value": enterprise_value,
                 "assumptions": {
                     "growth_rate": growth_rate,
                     "discount_rate": discount_rate,
@@ -146,6 +145,7 @@ class ValuationEngine:
             return {"error": str(e)}
         finally:
             session.close()
+
 
 if __name__ == "__main__":
     engine = ValuationEngine()
