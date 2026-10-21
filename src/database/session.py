@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker,Session
 from src.database.models import Base
 from dotenv import load_dotenv
+import logging
 import os
 
 
@@ -13,7 +14,11 @@ class DatabaseSession:
         # Get the URL from .env
         self.db_url = os.getenv("DATABASE_URL")
         if not self.db_url:
-            raise ValueError("DATABASE_URL not found in .env file")
+            # Fallback to an on-disk SQLite DB for quick local usage
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("DATABASE_URL not set; falling back to SQLite at fundamental.db")
+            self.db_url = "sqlite:///fundamental.db"
 
         # The Engine is the actual connection to the DB
         self.engine = create_engine(self.db_url)
@@ -29,9 +34,9 @@ class DatabaseSession:
         """Creates all tables defined in models.py if they don't exist."""
         try:
             Base.metadata.create_all(bind=self.engine)
-            print("✅ Database tables created successfully!")
+            print("Database tables created successfully!")
         except Exception as e:
-            print(f"❌ Error creating tables: {e}")
+            print(f"Error creating tables: {e}")
 
     def get_session(self) -> Session:
         """Returns a new database session."""

@@ -86,6 +86,21 @@ def _fetch_from_yfinance(symbol: str) -> float:
     return float('nan')
 
 
+
+
+def _fetch_shares_from_yfinance(symbol: str) -> float:
+    """Fetch shares outstanding via Yahoo Finance.
+
+    Returns the number of shares outstanding if available, otherwise NaN.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        shares = ticker.info.get('sharesOutstanding')
+        if shares is not None and not pd.isna(shares):
+            return float(shares)
+    except Exception as e:
+        logger.error(f"YFinance shares error for {symbol}: {e}")
+    return float('nan')
 def _fetch_from_infoway(symbol: str) -> float:
     """Infoway is India‑specific and is disabled in the US‑only version.
 
@@ -169,12 +184,10 @@ class CurrentData:
         finally:
             session.close()
 
-        # Finnhub first
-        shares = _fetch_from_finnhub(symbol)
-        # Yahoo fallback
+        # Use YFinance for shares
+        shares = _fetch_shares_from_yfinance(symbol)
         if _shares_invalid(shares):
-            logger.info(f"Finnhub shares unavailable for {symbol}, trying YFinance...")
-            shares = _fetch_from_yfinance(symbol)
+            logger.info(f"YFinance shares unavailable for {symbol}")
         if not _shares_invalid(shares):
             session = self.db.get_session()
             try:

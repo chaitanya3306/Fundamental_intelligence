@@ -13,7 +13,7 @@ class FinancialCleaner:
     def __init__(self,raw_dir:str="data/raw",silver_dir:str="data/silver"):
         self.raw_dir=raw_dir
         self.silver_dir=silver_dir
-        os.makedirs(silver_dir)
+        os.makedirs(silver_dir, exist_ok=True)
 
     def _transpose_and_clean(self,df:pd.DataFrame)->pd.DataFrame:
         #in this we just transpose and clean the missing values
@@ -33,12 +33,13 @@ class FinancialCleaner:
             statements=["income_statement","balance_sheet","cashflow"]
 
             company_silver_dir=os.path.join(self.silver_dir,symbol)
-            os.makedirs(company_silver_dir)
+            os.makedirs(company_silver_dir, exist_ok=True)
             for stm in statements:
                 file_path=os.path.join(self.raw_dir,symbol,f"{stm}.csv")
 
                 if not os.path.exists(file_path):
                     logger.warning(f"file not found : {file_path}")
+                    continue
 
                 df_raw=pd.read_csv(file_path,index_col=0)
                 df_clean=self._transpose_and_clean(df_raw)
