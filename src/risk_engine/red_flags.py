@@ -39,7 +39,7 @@ class RedFlagEngine:
         RULE: Receivables are growing faster than Revenue.
         """
         rev_series = self.metrics.get_metric_series(symbol, "Total Revenue")
-        rec_series = self.metrics.get_metric_series(symbol, "Total Receivables")
+        rec_series = self.metrics.get_metric_series(symbol, "Accounts Receivable")
 
         # Need at least two data points for a YoY comparison
         if rev_series.empty or rec_series.empty or len(rev_series) < 2:
