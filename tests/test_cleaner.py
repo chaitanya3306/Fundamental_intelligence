@@ -384,7 +384,8 @@ def test_failed_publication_preserves_existing_silver_data(tmp_path, monkeypatch
         assert (silver_folder / f"{name}.csv").read_bytes() == original
 
 
-def test_loader_rejects_incomplete_silver_dataset(tmp_path):
+def test_loader_rejects_incomplete_silver_dataset(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCIAL_SILVER_DIR", str(tmp_path / "silver"))
     silver_folder = tmp_path / "silver" / "INCOMPLETE"
     silver_folder.mkdir(parents=True)
     write_csv(silver_folder / "income_statement.csv", [
