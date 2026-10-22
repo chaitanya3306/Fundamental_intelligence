@@ -11,36 +11,51 @@ load_dotenv()
 class DatabaseSession:
 
     def __init__(self):
-        # Get the URL from .env
-        self.db_url = os.getenv("DATABASE_URL")
-        if not self.db_url:
-            # Fallback to an on-disk SQLite DB for quick local usage
+        # Get the URL from .env; default to an on‑disk SQLite DB for quick local usage.
+        self.engine_url = os.getenv("DATABASE_URL")
+        if not self.engine_url:
             import logging
             logger = logging.getLogger(__name__)
             logger.info("DATABASE_URL not set; falling back to SQLite at fundamental.db")
-            self.db_url = "sqlite:///fundamental.db"
+            self.engine_url = "sqlite:///fundamental.db"
 
-        # The Engine is the actual connection to the DB
-        self.engine = create_engine(self.db_url)
+        # Engine and SessionLocal are created lazily so that tests can override
+        # ``engine_url`` after import without needing to re‑instantiate the class.
+        self._engine = None
+        self._SessionLocal = None
+        self._ensure_engine()
 
-        # The sessionmaker is the 'factory' that creates sessions
-        self.SessionLocal = sessionmaker(
-            bind=self.engine,
-            autocommit=False,
-            autoflush=False
-        )
+    def _ensure_engine(self):
+        """Create or recreate the SQLAlchemy engine and session factory.
+
+        This method is called before any operation that needs a database
+        connection. If ``engine_url`` has been changed (e.g. by a test that
+        monkey‑patches it to point at an in‑memory SQLite file), a new engine is
+        constructed and the sessionmaker is refreshed.
+        """
+        if self._engine is None or str(self._engine.url) != self.engine_url:
+            self._engine = create_engine(self.engine_url)
+            self._SessionLocal = sessionmaker(
+                bind=self._engine,
+                autocommit=False,
+                autoflush=False,
+            )
 
     def create_tables(self):
-        """Creates all tables defined in models.py if they don't exist."""
+        """Create all tables defined in ``models.py`` if they don't exist."""
+        self._ensure_engine()
         try:
-            Base.metadata.create_all(bind=self.engine)
+            Base.metadata.create_all(bind=self._engine)
             print("Database tables created successfully!")
         except Exception as e:
             print(f"Error creating tables: {e}")
 
     def get_session(self) -> Session:
-        """Returns a new database session."""
-        return self.SessionLocal()
+        """Return a new database session."""
+        self._ensure_engine()
+        return self._SessionLocal()
+
+
 
 
 

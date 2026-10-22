@@ -72,6 +72,23 @@ class FinancialMetrics:
                 "cagr": self.calculate_cagr(beginning_val, current_val, periods)
             }
         return report
+    def _safe_divide(self, numerator: float, denominator: float) -> float:
+        """Internal helper to handle financial division safety."""
+        if denominator == 0 or pd.isna(denominator) or denominator < 0:
+            return float('nan')
+        return (numerator / denominator) * 100
+
+    def calculate_net_profit_margin(self, net_income: float, total_revenue: float) -> float:
+        return self._safe_divide(net_income, total_revenue)
+
+    def calculate_gross_margin(self, gross_profit: float, total_revenue: float) -> float:
+        return self._safe_divide(gross_profit, total_revenue)
+
+    def calculate_operating_margin(self, operating_income: float, total_revenue: float) -> float:
+        return self._safe_divide(operating_income, total_revenue)
+
+    def calculate_roe(self, net_income: float, shareholder_equity: float) -> float:
+        return self._safe_divide(net_income, shareholder_equity)
 
 if __name__=="__main__":
     metrics=FinancialMetrics()

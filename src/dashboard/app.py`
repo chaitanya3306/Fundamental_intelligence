@@ -1,0 +1,289 @@
+import streamlit as st
+import requests
+import pandas as pd
+import math
+
+# 1. PAGE CONFIGURATION
+st.set_page_config(
+    page_title="FinSight AI | Professional Intelligence",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- CUSTOM CSS FOR HIGH-FIDELITY DESIGN ---
+# We use CSS injection to override Streamlit's default look and create the "Command Center" aesthetic.
+st.markdown("""
+    <style>
+    /* Main Background and Text */
+    .stApp {
+        background-color: #0e1117;
+        color: #e0e0e0;
+    }
+
+    /* Sidebar Styling */
+    [data-testid="stSidebar"] {
+        background-color: #05070a !important;
+        border-right: 1px solid #262730;
+    }
+
+    /* Custom KPI Card Styling - Glassmorphism */
+    .kpi-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        transition: transform 0.3s ease, border-color 0.3s ease;
+        margin-bottom: 20px;
+    }
+    .kpi-card:hover {
+        transform: translateY(-5px);
+        border-color: #4facfe;
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .kpi-label {
+        color: #8b8b8b;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+        font-weight: 600;
+    }
+    .kpi-value {
+        color: #ffffff;
+        font-size: 1.8rem;
+        font-weight: 700;
+        font-family: 'Inter', sans-serif;
+    }
+    .kpi-delta {
+        font-size: 0.9rem;
+        font-weight: 500;
+        margin-top: 5px;
+    }
+    .delta-pos { color: #00ffa3; }
+    .delta-neg { color: #ff4b4b; }
+
+    /* Section Headers */
+    .section-header {
+        color: #ffffff;
+        font-size: 1.4rem;
+        font-weight: 600;
+        margin: 30px 0 20px 0;
+        border-left: 4px solid #4facfe;
+        padding-left: 15px;
+    }
+
+    /* Coming Soon Placeholder */
+    .coming-soon {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px dashed #444;
+        border-radius: 12px;
+        padding: 40px;
+        text-align: center;
+        color: #666;
+        font-style: italic;
+    }
+
+    /* Hide Streamlit Brand/Menu */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
+# --- HELPER FUNCTIONS ---
+def fetch_api_data(endpoint, symbol, params=None):
+    try:
+        url = f"http://127.0.0.1:8000/{endpoint}/{symbol}"
+        if params:
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            url += f"?{query_string}"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        if "error" in data:
+            return None, data["error"]
+        return data, None
+    except Exception as e:
+        return None, str(e)
+
+def format_usd(value):
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"${value:,.2f}"
+
+# --- SIDEBAR NAVIGATION ---
+with st.sidebar:
+    st.markdown("<h1 style='color: white; font-size: 1.8rem;'>📈 FinSight AI</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #8b8b8b; font-size: 0.8rem;'>Professional Research Intelligence</p>", unsafe_allow_html=True)
+    st.markdown("---")
+
+    # Company Selection
+    TICKER_OPTIONS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA"]
+    selected_ticker = st.selectbox("Company Ticker", options=TICKER_OPTIONS, index=0)
+
+    st.markdown("---")
+    st.markdown("<p style='color: #8b8b8b; font-weight: 600;'>NAVIGATION</p>", unsafe_allow_html=True)
+
+    # Navigation Menu
+    nav_options = [
+        "🏠 Overview",
+        "📊 Key Metrics",
+        "📑 Financial Statements",
+        "💎 Valuation & DCF",
+        "🛡️ Financial Quality",
+        "📈 Growth Analysis",
+        "🕒 Historical Trends",
+        "👥 Peer Comparison",
+        "🐋 WhaleWatch AI (Coming Soon)"
+    ]
+    selected_nav = st.radio("Explore Analysis", options=nav_options)
+
+    st.markdown("---")
+    st.markdown("<p style='color: #8b8b8b; font-weight: 600;'>DCF ASSUMPTIONS</p>", unsafe_allow_html=True)
+    growth_rate = st.slider("Growth Rate (%)", 0, 30, 10) / 100
+    discount_rate = st.slider("Discount Rate (%)", 5, 20, 12) / 100
+    term_growth = st.slider("Terminal Growth (%)", 0, 5, 3) / 100
+
+# --- MAIN CONTENT AREA ---
+symbol = selected_ticker
+
+# Header Section
+col_title, col_meta = st.columns([3, 1])
+with col_title:
+    st.markdown(f"<h1 style='color: white; margin-bottom: 0;'>{symbol} Analysis Report</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #8b8b8b; margin-top: -10px;'>Equity Research | US Market | Real-time Data</p>", unsafe_allow_html=True)
+
+with col_meta:
+    # In a real app, these would come from the /company/{symbol} endpoint
+    st.markdown("""
+        <div style='text-align: right; color: #8b8b8b; font-size: 0.85rem;'>
+            <b>Sector:</b> Technology<br>
+            <b>Industry:</b> Consumer Electronics<br>
+            <b>Last Updated:</b> 2026-10-22
+        </div>
+    """, unsafe_allow_html=True)
+
+# --- DATA FETCHING ---
+metrics, m_err = fetch_api_data("metrics", symbol)
+risks, r_err = fetch_api_data("risks", symbol)
+valuation, v_err = fetch_api_data("valuation", symbol)
+dcf_params = {"growth": growth_rate, "discount": discount_rate, "terminal_growth": term_growth}
+intrinsic, i_err = fetch_api_data("intrinsic", symbol, params=dcf_params)
+
+metrics = metrics or {}
+risks = risks or {}
+valuation = valuation or {}
+intrinsic = intrinsic or {}
+
+# --- CONTENT ROUTING ---
+if "Overview" in selected_nav:
+    # 1. KPI ROW
+    st.markdown("<div class='section-header'>Executive Summary</div>", unsafe_allow_html=True)
+
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+
+    # Revenue Card
+    rev = metrics.get('Total Revenue', {})
+    with kpi_col1:
+        yoy = rev.get('yoy_growth', 0)
+        delta_class = "delta-pos" if yoy >= 0 else "delta-neg"
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Total Revenue</div>
+                <div class="kpi-value">{format_usd(rev.get('current_value'))}</div>
+                <div class="kpi-delta {delta_class}">{yoy:+.2f}% YoY</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # Net Profit Card
+    ni = metrics.get('Net Income', {})
+    with kpi_col2:
+        yoy = ni.get('yoy_growth', 0)
+        delta_class = "delta-pos" if yoy >= 0 else "delta-neg"
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Net Profit</div>
+                <div class="kpi-value">{format_usd(ni.get('current_value'))}</div>
+                <div class="kpi-delta {delta_class}">{yoy:+.2f}% YoY</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # P/E Ratio Card
+    pe_ratio = valuation.get('P/E_Ratio')
+    pe_display = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
+    with kpi_col3:
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">P/E Ratio</div>
+                <div class="kpi-value">{pe_display}</div>
+                <div class="kpi-delta" style="color: #8b8b8b;">Market Relative</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # Intrinsic Value Card
+    intrinsic_val = intrinsic.get('intrinsic_value')
+    current_price = valuation.get('current_price')
+
+    if intrinsic_val is not None and current_price is not None:
+        status = "🟢 Undervalued" if intrinsic_val > current_price else "🔴 Overvalued"
+        status_color = "#00ffa3" if intrinsic_val > current_price else "#ff4b4b"
+    else:
+        status = "⚠️ Data Missing"
+        status_color = "#8b8b8b"
+
+    with kpi_col4:
+        st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Intrinsic Value</div>
+                <div class="kpi-value">{format_usd(intrinsic_val)}</div>
+                <div class="kpi-delta" style="color: {status_color};">{status}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # 2. RISK AUDIT PANEL
+    st.markdown("<div class='section-header'>Risk Intelligence Audit</div>", unsafe_allow_html=True)
+
+    risk_cols = st.columns(2)
+    if risks:
+        for i, (rule, result) in enumerate(risks.items()):
+            with risk_cols[i % 2]:
+                if result.get('triggered'):
+                    st.markdown(f"""
+                        <div style="background: rgba(255, 75, 75, 0.1); border: 1px solid #ff4b4b; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                            <b style="color: #ff4b4b;">🚩 {rule}:</b> <span style="color: #ddd;">{result.get('message')}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                        <div style="background: rgba(0, 255, 163, 0.05); border: 1px solid #00ffa3; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                            <b style="color: #00ffa3;">✅ {rule}:</b> <span style="color: #ddd;">{result.get('message')}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+    else:
+        st.info("No risk audit data available.")
+
+elif "WhaleWatch AI" in selected_nav:
+    st.markdown("<div class='section-header'>WhaleWatch AI</div>", unsafe_allow_html=True)
+    st.markdown("""
+        <div class="coming-soon">
+            <h2>Coming Soon</h2>
+            <p>Market Intelligence & Insider Transaction Tracking is currently in development.</p>
+            <p style="font-size: 0.8rem;">Our agents are currently indexing regulatory filings and anomaly patterns.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+else:
+    # Placeholder for other sections
+    st.markdown(f"<div class='section-header'>{selected_nav}</div>", unsafe_allow_html=True)
+    st.markdown(f"""
+        <div class="coming-soon">
+            <h2>Module Under Construction</h2>
+            <p>The {selected_nav} analysis panel is being integrated with the laest financial data.</p>
+            <p style="font-size: 0.8rem;">This section will be fully functional once the backend logic is expanded.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+# Footer
+st.markdown("---")
+st.markdown("<p style='text-align: center; color: #444; font-size: 0.7rem;'>FinSight AI Professional Research Terminal | Verified Data Sources</p>", unsafe_allow_html=True)

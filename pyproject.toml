@@ -13,6 +13,7 @@ dependencies = [
     "plotly>=7.1.0",
     "psycopg2-binary>=2.9.13",
     "pydantic>=2.13.5",
+    "pytest>=9.1.1",
     "sqlalchemy>=2.0.54",
     "streamlit>=1.64.0",
     "uvicorn>=0.53.0",
