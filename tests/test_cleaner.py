@@ -332,3 +332,126 @@ def test_failed_refresh_preserves_existing_silver_data(tmp_path):
 
         assert silver_file.exists()
         assert silver_file.read_bytes() == original_content
+
+
+
+def test_failed_publication_preserves_existing_silver_data(
+    tmp_path, monkeypatch
+):
+    import os
+
+    import pandas as pd
+
+    import src.data_cleaning.cleaner as cleaner_module
+    from src.data_cleaning.cleaner import FinancialCleaner
+
+    raw_dir = tmp_path / "raw"
+    silver_dir = tmp_path / "silver"
+    raw_dir.mkdir()
+    silver_dir.mkdir()
+
+    symbol = "TESTCO"
+    company_raw_dir = raw_dir / symbol
+    company_raw_dir.mkdir()
+
+    statements = (
+        "income_statement",
+        "balance_sheet",
+        "cashflow",
+    )
+
+    # Use the exact metric names required by the validator.
+    original_statement_data = {
+        "income_statement": {
+            "Total Revenue": [100.0, 90.0],
+        },
+        "balance_sheet": {
+            "Total Assets": [500.0, 450.0],
+            "Total Liabilities Net Minority Interest": [200.0, 180.0],
+        },
+        "cashflow": {
+            "Free Cash Flow": [50.0, 40.0],
+        },
+    }
+
+    def write_raw_statements(statement_data):
+        for statement, metrics in statement_data.items():
+            pd.DataFrame(
+                metrics,
+                index=["2024-12-31", "2023-12-31"],
+            ).T.to_csv(company_raw_dir / f"{statement}.csv")
+
+    write_raw_statements(original_statement_data)
+
+    cleaner = FinancialCleaner(
+        raw_dir=str(raw_dir),
+        silver_dir=str(silver_dir),
+    )
+
+    # Establish a valid existing Silver dataset.
+    assert cleaner.process_company(symbol) is True
+
+    company_silver_dir = silver_dir / symbol
+
+    original_contents = {
+        statement: (
+            company_silver_dir / f"{statement}.csv"
+        ).read_bytes()
+        for statement in statements
+    }
+
+    # Prepare different data for the attempted refresh.
+    updated_statement_data = {
+        "income_statement": {
+            "Total Revenue": [200.0, 180.0],
+        },
+        "balance_sheet": {
+            "Total Assets": [700.0, 650.0],
+            "Total Liabilities Net Minority Interest": [250.0, 220.0],
+        },
+        "cashflow": {
+            "Free Cash Flow": [80.0, 70.0],
+        },
+    }
+
+    write_raw_statements(updated_statement_data)
+
+    # Simulate failure during the second publication replacement.
+    real_replace = os.replace
+    publication_count = 0
+
+    def failing_replace(src, dst):
+        nonlocal publication_count
+
+        # Publication destinations are the final Silver CSV paths.
+        if (
+            str(dst).endswith(".csv")
+            and str(company_silver_dir) in str(dst)
+        ):
+            publication_count += 1
+
+            if publication_count == 2:
+                raise OSError("Simulated publication failure")
+
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(
+        cleaner_module.os,
+        "replace",
+        failing_replace,
+    )
+
+    # The refresh must report failure.
+    assert cleaner.process_company(symbol) is False
+
+    # Confirm that the simulated failure actually occurred.
+    assert publication_count == 2
+
+    # Every previously published file must remain unchanged.
+    for statement in statements:
+        published_file = company_silver_dir / f"{statement}.csv"
+
+        assert published_file.read_bytes() == original_contents[statement], (
+            f"{statement}.csv changed despite publication failure"
+        )
+
