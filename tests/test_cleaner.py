@@ -111,8 +111,7 @@ def test_missing_value_preserved(tmp_path):
     write_csv(
         raw_dir / "income_statement.csv",
         rows=[
-            {"Metric": "Total Revenue", "2024-01-01": "100"},
-            {"Metric": "Total Revenue", "2024-04-01": ""},  # empty → NaN
+            {"Metric": "Total Revenue", "2024-01-01": "100", "2024-04-01": ""},
         ],
         header=["Metric", "2024-01-01", "2024-04-01"],
     )
@@ -136,8 +135,8 @@ def test_missing_value_preserved(tmp_path):
 
     silver_file = tmp_path / "silver" / "MISSCO" / "income_statement.csv"
     df = pd.read_csv(silver_file, index_col=0)
-    # The second date column should be NaN
-    assert pd.isna(df["2024-04-01"].iloc[0])
+    # Silver-layer rows are reporting periods and missing financial values stay missing.
+    assert pd.isna(df.loc["2024-04-01", "Total Revenue"])
 
 
 # ======================================================================
