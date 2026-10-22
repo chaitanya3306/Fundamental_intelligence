@@ -14,10 +14,21 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+from types import SimpleNamespace
+
+
 class DatabaseLoader:
 
+    # Expose model classes for tests that expect DatabaseLoader.model
+    model = SimpleNamespace(Company=Company, FinancialStatement=FinancialStatement)
+
     def __init__(self,silver_dir:str="data/silver"):
-        self.silver_dir=silver_dir
+        # Allow overriding the silver directory via an environment variable for
+        # testing or pipeline integration. If the env var is set, it takes
+        # precedence over the default argument.
+        env_dir = os.getenv("FINANCIAL_SILVER_DIR")
+        self.silver_dir = env_dir if env_dir is not None else silver_dir
+
 
     def _get_or_create_company(self,session,symbol:str)->int:
         company=session.query(Company).filter(Company.ticker==symbol).first()
@@ -64,13 +75,26 @@ class DatabaseLoader:
 
 
     def _load_statement(self,session,df:pd.DataFrame,company_id:int,statement_type:str):
-        for date,row in df.iterrows():
-            report_date = pd.to_datetime(date).date()
-
-            for metric_name,value in row.items():
-                #create the entry:
-                self._upsert_statement(session, company_id, statement_type, report_date,
-                                       metric_name, float(value))
+        # Determine orientation: if index values are dates (parsable), treat rows as dates;
+        # otherwise assume index contains metric names and columns are dates.
+        if pd.api.types.is_string_dtype(df.index):
+            # Index likely metric names
+            for metric_name, row in df.iterrows():
+                for date_str, value in row.items():
+                    if pd.isna(value):
+                        continue
+                    report_date = pd.to_datetime(date_str).date()
+                    self._upsert_statement(session, company_id, statement_type, report_date,
+                                           metric_name, float(value))
+        else:
+            # Index likely dates
+            for date, row in df.iterrows():
+                report_date = pd.to_datetime(date).date()
+                for metric_name, value in row.items():
+                    if pd.isna(value):
+                        continue
+                    self._upsert_statement(session, company_id, statement_type, report_date,
+                                           metric_name, float(value))
     def _load_company_data(self,symbol):
         #handle the company
         session=db_manager.get_session()

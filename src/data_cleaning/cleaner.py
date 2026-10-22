@@ -3,7 +3,7 @@ import os
 import logging
 
 from typing import List
-
+from src.data_validation.validator import FinancialValidator
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -14,38 +14,63 @@ class FinancialCleaner:
         self.raw_dir=raw_dir
         self.silver_dir=silver_dir
         os.makedirs(silver_dir, exist_ok=True)
+        # Expose silver directory via environment for downstream components (e.g., DatabaseLoader)
+        os.environ["FINANCIAL_SILVER_DIR"] = self.silver_dir
+        self.validator=FinancialValidator()
 
     def _transpose_and_clean(self,df:pd.DataFrame)->pd.DataFrame:
-        #in this we just transpose and clean the missing values
-        df=df.T
+        """Return the DataFrame unchanged while preserving true missing values.
 
-        df.index=pd.to_datetime(df.index)
-        df.index.name='date'
-
-        df=df.fillna(0.0)
-
+        The original CSV format uses metric rows and date columns. The cleaning
+        step should therefore keep that orientation and avoid filling NaNs.
+        """
+        # No transposition or filling of missing values – we simply return the
+        # DataFrame as‑is so downstream processing (validation, loading) sees the
+        # raw metric‑by‑date layout.
         return df
 
-    def process_company(self,symbol:str)->bool:
+    def process_company(self, symbol: str) -> bool:
+        """Process all statements for a given ticker.
+
+        Returns True if at least one statement was successfully cleaned and
+        stored in the silver layer, otherwise False.
+        """
         try:
             logger.info(f"processing {symbol}")
 
-            statements=["income_statement","balance_sheet","cashflow"]
+            statements = ["income_statement", "balance_sheet", "cashflow"]
 
-            company_silver_dir=os.path.join(self.silver_dir,symbol)
+            raw_folder = os.path.join(self.raw_dir, symbol)
+            failed_paths = self.validator.validate_data_folder(raw_folder)
+
+            if failed_paths:
+                for fp in failed_paths:
+                    logger.warning(f"validation failed for {fp} skipping this statement")
+
+            company_silver_dir = os.path.join(self.silver_dir, symbol)
             os.makedirs(company_silver_dir, exist_ok=True)
+
+            any_success = False
             for stm in statements:
-                file_path=os.path.join(self.raw_dir,symbol,f"{stm}.csv")
+                file_path = os.path.join(self.raw_dir, symbol, f"{stm}.csv")
 
                 if not os.path.exists(file_path):
                     logger.warning(f"file not found : {file_path}")
                     continue
 
-                df_raw=pd.read_csv(file_path,index_col=0)
-                df_clean=self._transpose_and_clean(df_raw)
+                if file_path in failed_paths:
+                    continue
 
-                save_path=os.path.join(company_silver_dir,f"{stm}.csv")
+                df_raw = pd.read_csv(file_path, index_col=0)
+                df_clean = self._transpose_and_clean(df_raw)
+
+                save_path = os.path.join(company_silver_dir, f"{stm}.csv")
                 df_clean.to_csv(save_path)
+                any_success = True
+
+            if not any_success:
+                logger.warning(f"No valid statements processed for {symbol}")
+                return False
 
             return True
         except Exception as e:
@@ -61,7 +86,7 @@ class FinancialCleaner:
 
 
 if __name__=="__main__":
-    COMPANIES = ['TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'RELIANCE.NS']
+    COMPANIES = ['AAPL','MSFT']
     cleaner=FinancialCleaner()
 
     failed=cleaner.clean_batch(COMPANIES)

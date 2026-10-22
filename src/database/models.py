@@ -1,4 +1,7 @@
-from sqlalchemy import Column,Date, Integer, String, Float, ForeignKey, nulls_last,DateTime
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy import select
+
+from sqlalchemy import Column, Date, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 Base=declarative_base()
@@ -29,5 +32,24 @@ class FinancialStatement(Base):
     metric_name=Column(String,nullable=False)
     value=Column(Float,nullable=False)
 
-    # relationships:
-    company=relationship("Company",back_populates="statements")
+    company=relationship("Company", back_populates="statements")
+
+    @hybrid_property
+    def company_ticker(self):
+        """Return the ticker symbol of the related company.
+
+        This hybrid property allows ORM queries such as
+        ``filter_by(company_ticker='BADCO')`` to work by generating a subquery
+        that selects the ticker from the ``companies`` table based on the
+        ``company_id`` foreign key.
+        """
+        return self.company.ticker if self.company else None
+
+    @company_ticker.expression
+    def company_ticker(cls):
+        return (
+            select(Company.ticker)
+            .where(Company.company_id == cls.company_id)
+            .scalar_subquery()
+        )
+
