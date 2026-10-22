@@ -24,6 +24,9 @@ class FinancialValidator:
         return True,""
 
     def _check_columns(self,df:pd.DataFrame,statement:str)->Tuple[bool,str]:
+        if statement not in self.required_columns:
+            return False, f"Unsupported statement type: {statement}"
+
         required_cols=self.required_columns.get(statement,[])
         all_available_labels=list(df.index)+list(df.columns)
         missing=[col for col in required_cols if col not in all_available_labels]
@@ -31,6 +34,35 @@ class FinancialValidator:
         if missing:
             return False , f"some features are missing : {missing}"
         return True,""
+
+    def _check_numeric_values(
+            self,
+            df: pd.DataFrame,
+            statement: str,
+    ) -> Tuple[bool, str]:
+
+        required_cols = self.required_columns[statement]
+
+        for metric in required_cols:
+            if metric in df.index:
+                values = df.loc[metric]
+            elif metric in df.columns:
+                values = df[metric]
+            else:
+                return False, f"Required metric not found: {metric}"
+
+            numeric_values = pd.to_numeric(values, errors="coerce")
+
+            invalid_values = values.notna() & numeric_values.isna()
+
+            if invalid_values.any():
+                bad_values = values[invalid_values].tolist()
+
+                return False, (
+                    f"Non-numeric values found for {metric}: {bad_values}"
+                )
+
+        return True, ""
 
     def validate_file(self,file_path:str,statement:str)->bool:
         #in this file we are checking all the constraints together on any file
@@ -48,11 +80,21 @@ class FinancialValidator:
                 logger.warning(f"validation failed missing features detected :{file_path} : {msg}")
                 return False
 
+            is_ok, msg = self._check_numeric_values(df, statement)
+            if not is_ok:
+                logger.warning(
+                    "Validation failed for %s: %s",
+                    file_path,
+                    msg,
+                )
+                return False
+
             logger.info(f"{file_path} successfully validated !")
             return True
 
-        except Exception as e:
-            logger.error(f"failed validate file {file_path}")
+        except Exception:
+
+            logger.exception("Failed to validate file: %s", file_path)
             return False
 
     def validate_data_folder(self,folder_path:str):
@@ -65,6 +107,7 @@ class FinancialValidator:
                     failed_files.append(file_path)
             else:
                 logger.error(f"missing file {file_path}")
+                failed_files.append(file_path)
 
         return failed_files
 

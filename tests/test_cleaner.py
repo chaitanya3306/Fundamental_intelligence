@@ -189,19 +189,28 @@ def test_validation_failure_blocks_db_load(tmp_path):
     )
 
     cleaner = FinancialCleaner(raw_dir=str(tmp_path / "raw"), silver_dir=str(tmp_path / "silver"))
-    assert cleaner.clean_batch(["BADCO"]) == []
+    assert cleaner.clean_batch(["BADCO"]) == ["BADCO"]
 
     loader = DatabaseLoader()
+
+    # Incomplete cleaning must not publish Silver files.
+    silver_folder = tmp_path / "silver" / "BADCO"
+    assert not silver_folder.exists()
+
+    # The loader must not load data when no Silver statements exist.
     loader.load_batch(["BADCO"])
 
     session = db_manager.get_session()
-    count = (
-        session.query(DatabaseLoader.model.FinancialStatement)
-        .filter_by(company_ticker="BADCO")
-        .count()
-    )
-    session.close()
-    assert count == 2
+    try:
+        count = (
+            session.query(DatabaseLoader.model.FinancialStatement)
+            .filter_by(company_ticker="BADCO")
+            .count()
+        )
+    finally:
+        session.close()
+
+    assert count == 0
 
 
 # ======================================================================
@@ -224,11 +233,13 @@ def test_partial_success_still_processed(tmp_path):
     )
 
     cleaner = FinancialCleaner(raw_dir=str(tmp_path / "raw"), silver_dir=str(tmp_path / "silver"))
-    assert cleaner.clean_batch(["PARTCO"]) == []
+    assert cleaner.clean_batch(["PARTCO"]) == ["PARTCO"]
 
     silver_folder = tmp_path / "silver" / "PARTCO"
-    silver_files = sorted(p.name for p in silver_folder.iterdir())
-    assert silver_files == ["cashflow.csv", "income_statement.csv"]
+
+    # Failed cleaning must not publish partial Silver data.
+    assert not silver_folder.exists()
+    # assert silver_files == ["cashflow.csv", "income_statement.csv"]
 
 
 # ======================================================================
@@ -245,3 +256,79 @@ def test_pipeline_failure_reporting(tmp_path):
     cleaner = FinancialCleaner(raw_dir=str(tmp_path / "raw"), silver_dir=str(tmp_path / "silver"))
     failures = cleaner.clean_batch(["FAILCO"])
     assert failures == ["FAILCO"]
+
+
+
+def test_failed_refresh_preserves_existing_silver_data(tmp_path):
+    raw_dir = tmp_path / "raw" / "TESTCO"
+    raw_dir.mkdir(parents=True)
+
+    silver_dir = tmp_path / "silver"
+
+    # Step 1: Create valid raw statements.
+    write_csv(
+        raw_dir / "income_statement.csv",
+        rows=[
+            {"Metric": "Total Revenue", "2024-01-01": "100"},
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    write_csv(
+        raw_dir / "balance_sheet.csv",
+        rows=[
+            {
+                "Metric": "Total Assets",
+                "2024-01-01": "500",
+            },
+            {
+                "Metric": "Total Liabilities Net Minority Interest",
+                "2024-01-01": "200",
+            },
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    write_csv(
+        raw_dir / "cashflow.csv",
+        rows=[
+            {"Metric": "Free Cash Flow", "2024-01-01": "50"},
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    cleaner = FinancialCleaner(
+        raw_dir=str(tmp_path / "raw"),
+        silver_dir=str(silver_dir),
+    )
+
+    # Step 2: Initial cleaning should succeed.
+    assert cleaner.process_company("TESTCO") is True
+
+    silver_folder = silver_dir / "TESTCO"
+
+    # Step 3: Save the original contents of all Silver files.
+    original_contents = {
+        statement: (silver_folder / f"{statement}.csv").read_bytes()
+        for statement in (
+            "income_statement",
+            "balance_sheet",
+            "cashflow",
+        )
+    }
+
+    # Step 4: Make the new raw balance sheet invalid.
+    (raw_dir / "balance_sheet.csv").write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    # Step 5: The refresh must fail.
+    assert cleaner.process_company("TESTCO") is False
+
+    # Step 6: All previously published Silver files must remain unchanged.
+    for statement, original_content in original_contents.items():
+        silver_file = silver_folder / f"{statement}.csv"
+
+        assert silver_file.exists()
+        assert silver_file.read_bytes() == original_content
