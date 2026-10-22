@@ -332,3 +332,78 @@ def test_failed_refresh_preserves_existing_silver_data(tmp_path):
 
         assert silver_file.exists()
         assert silver_file.read_bytes() == original_content
+
+
+def test_failed_publication_preserves_existing_silver_data(tmp_path, monkeypatch):
+    import os
+    import src.data_cleaning.cleaner as cleaner_module
+
+    raw_dir = tmp_path / "raw" / "TESTCO"
+    raw_dir.mkdir(parents=True)
+    silver_dir = tmp_path / "silver"
+
+    def write_valid_data(revenue, assets, liabilities, free_cash_flow):
+        write_csv(raw_dir / "income_statement.csv", [
+            {"Metric": "Total Revenue", "2024-01-01": str(revenue)}
+        ], ["Metric", "2024-01-01"])
+        write_csv(raw_dir / "balance_sheet.csv", [
+            {"Metric": "Total Assets", "2024-01-01": str(assets)},
+            {"Metric": "Total Liabilities Net Minority Interest", "2024-01-01": str(liabilities)},
+        ], ["Metric", "2024-01-01"])
+        write_csv(raw_dir / "cashflow.csv", [
+            {"Metric": "Free Cash Flow", "2024-01-01": str(free_cash_flow)}
+        ], ["Metric", "2024-01-01"])
+
+    write_valid_data(100, 500, 200, 50)
+    cleaner = FinancialCleaner(raw_dir=str(tmp_path / "raw"), silver_dir=str(silver_dir))
+    assert cleaner.process_company("TESTCO") is True
+
+    silver_folder = silver_dir / "TESTCO"
+    original_contents = {
+        name: (silver_folder / f"{name}.csv").read_bytes()
+        for name in ("income_statement", "balance_sheet", "cashflow")
+    }
+
+    write_valid_data(200, 700, 250, 80)
+    real_replace = os.replace
+    publication_count = 0
+
+    def fail_second_publication(src, dst):
+        nonlocal publication_count
+        if str(dst).endswith(".csv") and str(silver_folder) in str(dst):
+            publication_count += 1
+            if publication_count == 2:
+                raise OSError("Simulated publication failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cleaner_module.os, "replace", fail_second_publication)
+
+    assert cleaner.process_company("TESTCO") is False
+    assert publication_count >= 2
+    for name, original in original_contents.items():
+        assert (silver_folder / f"{name}.csv").read_bytes() == original
+
+
+def test_loader_rejects_incomplete_silver_dataset(tmp_path):
+    silver_folder = tmp_path / "silver" / "INCOMPLETE"
+    silver_folder.mkdir(parents=True)
+    write_csv(silver_folder / "income_statement.csv", [
+        {"Metric": "Total Revenue", "2024-01-01": "100"}
+    ], ["Metric", "2024-01-01"])
+
+    loader = DatabaseLoader(silver_dir=str(tmp_path / "silver"))
+    assert loader._load_company_data("INCOMPLETE") is False
+
+    session = db_manager.get_session()
+    try:
+        company_count = (
+            session.query(DatabaseLoader.model.Company)
+            .filter_by(ticker="INCOMPLETE")
+            .count()
+        )
+        statement_count = session.query(DatabaseLoader.model.FinancialStatement).count()
+    finally:
+        session.close()
+
+    assert company_count == 0
+    assert statement_count == 0
