@@ -78,16 +78,24 @@ class DatabaseLoader:
 
     def _load_company_data(self, symbol: str) -> bool:
         folder = Path(self.silver_dir) / symbol
-        available = [name for name in STATEMENTS if (folder / f"{name}.csv").is_file()]
-        if not available:
-            logger.error("No Silver-layer statements found for %s in %s", symbol, folder)
+        missing = [
+            name for name in STATEMENTS
+            if not (folder / f"{name}.csv").is_file()
+        ]
+        if missing:
+            logger.error(
+                "Refusing to load incomplete Silver data for %s in %s; missing statements: %s",
+                symbol,
+                folder,
+                missing,
+            )
             return False
 
         session = db_manager.get_session()
         try:
             company_id = self._get_or_create_company(session, symbol)
             loaded = 0
-            for statement_type in available:
+            for statement_type in STATEMENTS:
                 path = folder / f"{statement_type}.csv"
                 df = pd.read_csv(path, index_col=0)
                 if df.empty:
