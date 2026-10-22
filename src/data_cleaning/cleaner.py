@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List
 import shutil
 import tempfile
+
 import pandas as pd
 
 from src.data_validation.validator import FinancialValidator
@@ -37,10 +38,8 @@ class FinancialCleaner:
             result[column] = pd.to_numeric(result[column], errors="raise")
         return result
 
-
-
     def process_company(self, symbol: str) -> bool:
-        """Clean all statements before publishing them to the Silver layer."""
+        """Clean all statements, publishing the refresh with rollback on errors."""
         raw_folder = self.raw_dir / symbol
         silver_folder = self.silver_dir / symbol
 
@@ -53,17 +52,17 @@ class FinancialCleaner:
                 )
                 return False
 
-            # Validate all required raw statements.
             invalid_paths = set(
                 self.validator.validate_data_folder(str(raw_folder))
             )
 
-            # Build all cleaned files in a temporary directory first.
             with tempfile.TemporaryDirectory(
-                    dir=str(self.silver_dir),
-                    prefix=f".{symbol}_staging_",
+                dir=str(self.silver_dir),
+                prefix=f".{symbol}_staging_",
             ) as staging_dir:
                 staging_folder = Path(staging_dir)
+                backup_folder = staging_folder / "backups"
+                backup_folder.mkdir()
                 successful = set()
 
                 for statement in STATEMENTS:
@@ -72,9 +71,7 @@ class FinancialCleaner:
 
                     if not source.is_file():
                         logger.warning(
-                            "Missing raw statement for %s: %s",
-                            symbol,
-                            source,
+                            "Missing raw statement for %s: %s", symbol, source
                         )
                         continue
 
@@ -100,12 +97,11 @@ class FinancialCleaner:
 
                         cleaned.to_csv(destination, index=True)
                         successful.add(statement)
-
                     except (
-                            OSError,
-                            ValueError,
-                            TypeError,
-                            pd.errors.ParserError,
+                        OSError,
+                        ValueError,
+                        TypeError,
+                        pd.errors.ParserError,
                     ):
                         logger.exception(
                             "Could not clean %s statement for %s",
@@ -113,7 +109,6 @@ class FinancialCleaner:
                             symbol,
                         )
 
-                # Do not publish partial results.
                 if successful != set(STATEMENTS):
                     logger.error(
                         "Cleaning incomplete for %s. Successfully cleaned: %s",
@@ -122,20 +117,63 @@ class FinancialCleaner:
                     )
                     return False
 
-                # All three statements are ready.
-                # Publish them only after cleaning has succeeded.
+                # Snapshot the old files before changing any published file.
                 silver_folder.mkdir(parents=True, exist_ok=True)
-
+                previous_files = {}
                 for statement in STATEMENTS:
-                    staged_file = staging_folder / f"{statement}.csv"
                     destination = silver_folder / f"{statement}.csv"
-                    temporary_destination = destination.with_suffix(".csv.tmp")
+                    if destination.is_file():
+                        backup = backup_folder / f"{statement}.csv"
+                        shutil.copy2(destination, backup)
+                        previous_files[statement] = backup
+                    else:
+                        previous_files[statement] = None
 
-                    try:
-                        shutil.copy2(staged_file, temporary_destination)
-                        os.replace(temporary_destination, destination)
-                    finally:
-                        temporary_destination.unlink(missing_ok=True)
+                published = []
+                try:
+                    for statement in STATEMENTS:
+                        staged_file = staging_folder / f"{statement}.csv"
+                        destination = silver_folder / f"{statement}.csv"
+                        temporary_destination = destination.with_suffix(".csv.tmp")
+                        try:
+                            shutil.copy2(staged_file, temporary_destination)
+                            os.replace(temporary_destination, destination)
+                            published.append(statement)
+                        finally:
+                            temporary_destination.unlink(missing_ok=True)
+                except Exception:
+                    logger.exception(
+                        "Publication failed for %s; restoring previous Silver files",
+                        symbol,
+                    )
+                    rollback_errors = []
+                    for statement in reversed(published):
+                        destination = silver_folder / f"{statement}.csv"
+                        backup = previous_files[statement]
+                        try:
+                            if backup is None:
+                                destination.unlink(missing_ok=True)
+                            else:
+                                rollback_temp = destination.with_suffix(".csv.rollback")
+                                try:
+                                    shutil.copy2(backup, rollback_temp)
+                                    os.replace(rollback_temp, destination)
+                                finally:
+                                    rollback_temp.unlink(missing_ok=True)
+                        except Exception as rollback_error:
+                            rollback_errors.append((statement, rollback_error))
+                            logger.exception(
+                                "Rollback failed for %s statement for %s",
+                                statement,
+                                symbol,
+                            )
+                    if rollback_errors:
+                        logger.critical(
+                            "Silver rollback was incomplete for %s: %s",
+                            symbol,
+                            rollback_errors,
+                        )
+                    return False
 
             logger.info("Successfully cleaned all statements for %s", symbol)
             return True
@@ -143,8 +181,6 @@ class FinancialCleaner:
         except Exception:
             logger.exception("Unexpected cleaning error for %s", symbol)
             return False
-
-
 
     def clean_batch(self, company_list: List[str]) -> List[str]:
         return [symbol for symbol in company_list if not self.process_company(symbol)]
