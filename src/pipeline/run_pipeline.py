@@ -1,48 +1,54 @@
+"""Run the raw -> Silver -> database pipeline with stage-level failure gates."""
 import logging
+from typing import Iterable, List
 
 from src.data_ingestion.fetch_basics import YFinanceFetcher
 from src.data_cleaning.cleaner import FinancialCleaner
 from src.database.loader import DatabaseLoader
-from src.database.session import db_manager
+
+logger = logging.getLogger(__name__)
+DEFAULT_TICKERS = ("AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA")
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
+def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
+    """Run each stage only for tickers that succeeded in the preceding stage.
 
-    # Ensure database tables exist (creates if missing)
-    try:
-        db_manager.create_tables()
-    except Exception as e:
-        logger.error(f"Failed to create DB tables: {e}")
-        return
+    Returning per-stage failures makes the run observable and prevents stale
+    raw/Silver files for a failed refresh from being loaded as if they were fresh.
+    """
+    requested = list(dict.fromkeys(tickers))
+    if not requested:
+        return {"requested": [], "fetch_failed": [], "clean_failed": [], "load_failed": []}
 
-    # List of US tickers to process – can be expanded as needed
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA"]
-
-    # 1️⃣ Fetch raw statements from yfinance
     fetcher = YFinanceFetcher()
-    failed_fetch = fetcher.download_batch(tickers)
-    if failed_fetch:
-        logger.warning(f"Raw data fetch failed for: {failed_fetch}")
-    else:
-        logger.info("Raw data fetched for all tickers.")
+    fetch_failed = fetcher.download_batch(requested)
+    fetched = [ticker for ticker in requested if ticker not in set(fetch_failed)]
 
-    # 2️⃣ Clean & transform raw CSVs into silver layer
     cleaner = FinancialCleaner()
-    failed_clean = cleaner.clean_batch(tickers)
-    if failed_clean:
-        logger.warning(f"Data cleaning failed for: {failed_clean}")
-    else:
-        logger.info("All raw data cleaned into silver layer.")
+    clean_failed = cleaner.clean_batch(fetched)
+    cleaned = [ticker for ticker in fetched if ticker not in set(clean_failed)]
 
-    # 3️⃣ Load silver data into the PostgreSQL/SQLite database (gold layer)
     loader = DatabaseLoader()
-    failed_load = loader.load_batch(tickers)
-    if failed_load:
-        logger.warning(f"Database load failed for: {failed_load}")
+    load_failed = loader.load_batch(cleaned)
+
+    result = {
+        "requested": requested,
+        "fetch_failed": fetch_failed,
+        "clean_failed": clean_failed,
+        "load_failed": load_failed,
+    }
+    logger.info("Pipeline summary: %s", result)
+    return result
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    result = run_pipeline()
+    failures = result["fetch_failed"] + result["clean_failed"] + result["load_failed"]
+    if failures:
+        logger.error("Pipeline completed with failures: %s", result)
     else:
-        logger.info("All ticker data successfully loaded into the DB.")
+        logger.info("Pipeline completed successfully for all requested tickers.")
 
 
 if __name__ == "__main__":

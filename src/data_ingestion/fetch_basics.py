@@ -1,75 +1,113 @@
-import os
 import logging
+import os
+from pathlib import Path
+from typing import List
+
 import pandas as pd
 import yfinance as yf
-from typing import List, Optional
 
-# No market‑suffix helper – we now assume all tickers are plain US symbols.
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
 class YFinanceFetcher:
-    def __init__(self, data_dir: str = "data/raw"):
-        self.data_dir = data_dir
-        os.makedirs(self.data_dir, exist_ok=True)
+    """Fetch annual financial statements into the raw-data layer.
 
-    def _save_dataframe(self, df: pd.DataFrame, symbol: str, statement_name: str):
-        folder_path = os.path.join(self.data_dir, symbol)
-        os.makedirs(folder_path, exist_ok=True)
-        file_path = os.path.join(folder_path, f"{statement_name}.csv")
+    A ticker is reported as successful only when all three expected statements
+    are retrieved and written. Missing statements are not treated as success.
+    """
+
+    STATEMENTS = {
+        "income_statement": "financials",
+        "balance_sheet": "balance_sheet",
+        "cashflow": "cashflow",
+    }
+
+    def __init__(self, data_dir: str = "data/raw") -> None:
+        self.data_dir = Path(data_dir)
+
+    def _save_dataframe(
+        self, df: pd.DataFrame, symbol: str, statement_name: str
+    ) -> bool:
+        """Write one statement and return whether the write succeeded."""
+        folder_path = self.data_dir / symbol
+        file_path = folder_path / f"{statement_name}.csv"
+
         try:
+            folder_path.mkdir(parents=True, exist_ok=True)
             df.to_csv(file_path)
-            logger.info(f"file {file_path} created for {symbol}")
-        except Exception as e:
-            logger.error(f"Disk Error : could not save the {statement_name} of {symbol} : {e}")
+            logger.info("Saved %s for %s to %s", statement_name, symbol, file_path)
+            return True
+        except OSError:
+            logger.exception(
+                "Could not save %s for %s to %s",
+                statement_name,
+                symbol,
+                file_path,
+            )
+            return False
 
     def fetch_company_data(self, symbol: str) -> bool:
-        """Fetch financial statements for *symbol* using yfinance.
+        """Fetch and save all expected statements for a US ticker.
 
-        In the US‑only version we pass the ticker to yfinance exactly as provided
-        (no ``.NS`` suffix is added). This works for symbols such as ``AAPL`` or
-        ``MSFT``.
+        Returns False if retrieval or writing fails for any expected statement.
+        A failed refresh may leave older files on disk; callers must therefore
+        use this result to prevent downstream processing of this ticker.
         """
         try:
-            yf_symbol = symbol  # US ticker – no suffix manipulation
-            logger.info(f"Fetching data for ticker '{yf_symbol}' (original request: '{symbol}')")
-            ticker = yf.Ticker(yf_symbol)
-
+            logger.info("Fetching financial statements for US ticker %s", symbol)
+            ticker = yf.Ticker(symbol)
             statements = {
                 "income_statement": ticker.financials,
                 "balance_sheet": ticker.balance_sheet,
                 "cashflow": ticker.cashflow,
             }
-
-            for name, df in statements.items():
-                if df is not None and not df.empty:
-                    self._save_dataframe(df, symbol, name)
-                else:
-                    logger.warning(f"{name} for {symbol} is not fetched")
-            return True
-        except Exception as e:
-            logger.error(f"API error : failed to fetch {symbol}: {e}")
+        except Exception:
+            logger.exception("Failed to retrieve statements for %s", symbol)
             return False
 
+        missing = [
+            name
+            for name, df in statements.items()
+            if df is None or not isinstance(df, pd.DataFrame) or df.empty
+        ]
+        if missing:
+            logger.warning(
+                "Incomplete refresh for %s; unavailable statements: %s",
+                symbol,
+                ", ".join(missing),
+            )
+            return False
+
+        failed_writes = []
+        for name, df in statements.items():
+            if not self._save_dataframe(df, symbol, name):
+                failed_writes.append(name)
+
+        if failed_writes:
+            logger.error(
+                "Incomplete refresh for %s; failed to save statements: %s",
+                symbol,
+                ", ".join(failed_writes),
+            )
+            return False
+
+        return True
+
     def download_batch(self, symbols: List[str]) -> List[str]:
+        """Return tickers for which the complete refresh failed."""
         failed_symbols: List[str] = []
         for symbol in symbols:
-            success = self.fetch_company_data(symbol)
-            if not success:
+            if not self.fetch_company_data(symbol):
                 failed_symbols.append(symbol)
         return failed_symbols
 
 
 if __name__ == "__main__":
-    # Example US tickers – replace with any symbols you wish to download.
-    COMPANIES = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+    logging.basicConfig(level=logging.INFO)
+    companies = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+    failures = YFinanceFetcher().download_batch(companies)
 
-    fetcher = YFinanceFetcher()
-    failures = fetcher.download_batch(COMPANIES)
-
-    if not failures:
-        logger.info("Success – all US data fetched!!")
+    if failures:
+        logger.warning("Financial statement fetch failed for: %s", failures)
     else:
-        logger.warning(f"Completed with errors. Failed symbols: {failures}")
+        logger.info("All requested financial statements were fetched and saved.")
