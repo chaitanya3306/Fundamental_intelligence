@@ -4,7 +4,16 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
-import yfinance as yf
+
+try:
+    import yfinance as yf
+except ImportError:
+    # Provide a stub yfinance with a Ticker class for tests that mock it.
+    class _YFinanceStub:
+        class Ticker:
+            def __init__(self, *args, **kwargs):
+                raise ImportError("yfinance package is required for YFinanceFetcher")
+    yf = _YFinanceStub()
 
 logger = logging.getLogger(__name__)
 
