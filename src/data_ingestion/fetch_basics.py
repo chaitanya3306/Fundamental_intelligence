@@ -161,6 +161,9 @@ class YFinanceFetcher:
             )
             return False
 
+        # Ensure the raw data directory exists before creating a staging sub‑directory.
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
         # Create a temporary staging directory inside the raw data root.
         try:
             staging_dir = tempfile.mkdtemp(

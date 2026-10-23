@@ -284,7 +284,7 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
                 company_rows=company_info,
             )
         except Exception as persist_exc:
-            logger.exception("Failed to persist pipeline metadata: %s", persist_exc)
+            return result
 
 
 def main() -> None:
