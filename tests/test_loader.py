@@ -1,195 +1,299 @@
-import csv
-from pathlib import Path
 
+from datetime import date
+
+import pandas as pd
 import pytest
+from sqlalchemy.exc import IntegrityError
 
-from src.database.loader import DatabaseLoader
 from src.database.models import Company, FinancialStatement
 from src.database.session import db_manager
+from src.database.loader import DatabaseLoader
+
 
 @pytest.fixture
-def isolated_database(tmp_path):
-    """Use a separate temporary SQLite database for each test."""
-    original_engine_url = db_manager.engine_url
-    db_manager.engine_url = f"sqlite:///{tmp_path / 'loader-test.db'}"
+def fresh_db(tmp_path, monkeypatch):
+    """Give every test its own temporary database."""
+    db_url = f"sqlite:///{tmp_path / 'test.db'}"
+
+    monkeypatch.setattr(db_manager, "engine_url", db_url)
     db_manager.create_tables()
 
     yield
 
-    # Close the test engine and restore the original configuration.
-    # Use the internal attributes of DatabaseSession to clean up.
-    if getattr(db_manager, "_engine", None) is not None:
+    # Close the temporary database connection after the test.
+    if db_manager._engine is not None:
         db_manager._engine.dispose()
-    db_manager._engine = None
-    db_manager._SessionLocal = None
-    db_manager.engine_url = original_engine_url
-
-def write_statement(path: Path, rows: list[dict]) -> None:
-    """Write a Silver statement CSV with dates as the index."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+        db_manager._engine = None
+        db_manager._SessionLocal = None
 
 
-    fieldnames = list(rows[0].keys())
-    date_column = "date"
-    metric_columns = [column for column in fieldnames if column != date_column]
-
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=[date_column, *metric_columns],
-        )
-        writer.writeheader()
-
-        for row in rows:
-            writer.writerow(row)
+def create_company(session, ticker="TEST"):
+    """Create a company and return its database ID."""
+    company = Company(ticker=ticker)
+    session.add(company)
+    session.flush()
+    return company.company_id
 
 
-def write_valid_silver_dataset(
-    silver_root: Path,
-    ticker: str = "TESTCO",
-    revenue: str = "100",
-) -> None:
-    """Create all three required Silver statement files."""
-    folder = silver_root / ticker
-    folder.mkdir(parents=True, exist_ok=True)
-
-    write_statement(
-        folder / "income_statement.csv",
-        [
-            {
-                "date": "2024-12-31",
-                "Total Revenue": revenue,
-                "Net Income": "25",
-            }
-        ],
-    )
-
-    write_statement(
-        folder / "balance_sheet.csv",
-        [
-            {
-                "date": "2024-12-31",
-                "Total Assets": "500",
-                "Total Liabilities": "200",
-            }
-        ],
-    )
-
-    write_statement(
-        folder / "cashflow.csv",
-        [
-            {
-                "date": "2024-12-31",
-                "Free Cash Flow": "50",
-            }
-        ],
-    )
-
-def query_counts(ticker: str) -> tuple[int, int]:
-    """Return company and financial observation counts for a ticker."""
+def test_duplicate_observation_is_rejected(fresh_db):
+    """The database must reject duplicate financial observations."""
     session = db_manager.get_session()
 
     try:
-        company_count = (
-            session.query(Company)
-            .filter(Company.ticker == ticker)
-            .count()
+        company_id = create_company(session)
+
+        observation = FinancialStatement(
+            company_id=company_id,
+            date=date(2024, 3, 31),
+            statement_type="income_statement",
+            metric_name="Total Revenue",
+            value=1000.0,
         )
 
-        company = (
-            session.query(Company)
-            .filter(Company.ticker == ticker)
-            .first()
+        session.add(observation)
+        session.commit()
+
+        duplicate = FinancialStatement(
+            company_id=company_id,
+            date=date(2024, 3, 31),
+            statement_type="income_statement",
+            metric_name="Total Revenue",
+            value=2000.0,
         )
 
-        observation_count = 0
+        session.add(duplicate)
 
-        if company is not None:
-            observation_count = (
-                session.query(FinancialStatement)
-                .filter(
-                    FinancialStatement.company_id == company.company_id
-                )
-                .count()
-            )
+        with pytest.raises(IntegrityError):
+            session.commit()
 
-        return company_count, observation_count
+        session.rollback()
+
     finally:
         session.close()
 
-def test_valid_silver_dataset_loads_all_observations(
-    tmp_path, monkeypatch, isolated_database
+
+def test_different_metrics_are_allowed(fresh_db):
+    """Different metrics for the same company and date are valid."""
+    session = db_manager.get_session()
+
+    try:
+        company_id = create_company(session)
+
+        session.add_all([
+            FinancialStatement(
+                company_id=company_id,
+                date=date(2024, 3, 31),
+                statement_type="income_statement",
+                metric_name="Total Revenue",
+                value=1000.0,
+            ),
+            FinancialStatement(
+                company_id=company_id,
+                date=date(2024, 3, 31),
+                statement_type="income_statement",
+                metric_name="Net Income",
+                value=200.0,
+            ),
+        ])
+
+        session.commit()
+
+        count = session.query(FinancialStatement).count()
+        assert count == 2
+
+    finally:
+        session.close()
+
+
+def test_same_metric_for_different_dates_is_allowed(fresh_db):
+    """The same metric can have observations for different periods."""
+    session = db_manager.get_session()
+
+    try:
+        company_id = create_company(session)
+
+        session.add_all([
+            FinancialStatement(
+                company_id=company_id,
+                date=date(2024, 3, 31),
+                statement_type="income_statement",
+                metric_name="Total Revenue",
+                value=1000.0,
+            ),
+            FinancialStatement(
+                company_id=company_id,
+                date=date(2024, 6, 30),
+                statement_type="income_statement",
+                metric_name="Total Revenue",
+                value=1200.0,
+            ),
+        ])
+
+        session.commit()
+
+        count = session.query(FinancialStatement).count()
+        assert count == 2
+
+    finally:
+        session.close()
+
+
+def test_loading_same_data_twice_does_not_duplicate_rows(
+    fresh_db, tmp_path, monkeypatch
 ):
-    """A valid dataset loads its company and all five observations."""
-    silver_root = tmp_path / "silver"
-    write_valid_silver_dataset(silver_root)
+    """Repeated pipeline loads update existing observations instead of duplicating them."""
+    silver_dir = tmp_path / "silver"
+    company_dir = silver_dir / "TEST"
+    company_dir.mkdir(parents=True)
 
-    monkeypatch.setenv("FINANCIAL_SILVER_DIR", str(silver_root))
-    loader = DatabaseLoader(silver_dir=str(silver_root))
+    # The loader expects reporting dates as rows and metrics as columns.
+    pd.DataFrame(
+        {"Total Revenue": [1000.0]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "income_statement.csv")
 
-    assert loader._load_company_data("TESTCO") is True
-    assert query_counts("TESTCO") == (1, 5)
+    pd.DataFrame(
+        {"Total Assets": [5000.0]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "balance_sheet.csv")
 
-def test_reloading_dataset_updates_existing_observations(
-    tmp_path, monkeypatch, isolated_database
-):
-    """Reloading changed financial data updates rather than duplicates rows."""
-    silver_root = tmp_path / "silver"
-    write_valid_silver_dataset(silver_root, revenue="100")
+    pd.DataFrame(
+        {"Free Cash Flow": [300.0]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "cashflow.csv")
 
-    monkeypatch.setenv("FINANCIAL_SILVER_DIR", str(silver_root))
-    loader = DatabaseLoader(silver_dir=str(silver_root))
+    monkeypatch.setenv("FINANCIAL_SILVER_DIR", str(silver_dir))
+    loader = DatabaseLoader()
 
-    assert loader._load_company_data("TESTCO") is True
+    # First load inserts the observations.
+    assert loader.load_batch(["TEST"]) == []
 
-    write_valid_silver_dataset(silver_root, revenue="125")
-
-    assert loader._load_company_data("TESTCO") is True
+    # Second load should update the existing observations.
+    assert loader.load_batch(["TEST"]) == []
 
     session = db_manager.get_session()
 
     try:
-        revenue_rows = (
+        company = session.query(Company).filter_by(ticker="TEST").one()
+
+        observations = (
             session.query(FinancialStatement)
-            .join(Company)
-            .filter(
-                Company.ticker == "TESTCO",
-                FinancialStatement.statement_type == "income_statement",
-                FinancialStatement.metric_name == "Total Revenue",
-            )
+            .filter_by(company_id=company.company_id)
             .all()
         )
 
-        assert len(revenue_rows) == 1
-        assert revenue_rows[0].value == pytest.approx(125.0)
+        # Three statements, one observation per statement.
+        assert len(observations) == 3
+
+        revenue = (
+            session.query(FinancialStatement)
+            .filter_by(
+                company_id=company.company_id,
+                statement_type="income_statement",
+                metric_name="Total Revenue",
+            )
+            .one()
+        )
+
+        assert revenue.value == 1000.0
+
     finally:
         session.close()
 
-    assert query_counts("TESTCO") == (1, 5)
 
-def test_invalid_value_rolls_back_company_and_partial_observations(
-    tmp_path, monkeypatch, isolated_database
+
+def write_valid_silver_files(company_dir):
+    """Create three valid Silver statement CSV files."""
+    pd.DataFrame(
+        {"Total Revenue": [1000.0]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "income_statement.csv")
+
+    pd.DataFrame(
+        {"Total Assets": [5000.0]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "balance_sheet.csv")
+
+    pd.DataFrame(
+        {"Free Cash Flow": [300.0]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "cashflow.csv")
+
+
+def test_empty_required_statement_rolls_back_entire_load(
+    fresh_db, tmp_path
 ):
-    """A loading error rolls back the company and earlier observations."""
-    silver_root = tmp_path / "silver"
-    write_valid_silver_dataset(silver_root)
+    silver_dir = tmp_path / "silver"
+    company_dir = silver_dir / "TEST"
+    company_dir.mkdir(parents=True)
 
-    # The loader processes income_statement before balance_sheet.
-    # This invalid value triggers an error after earlier observations
-    # have already been processed within the same transaction.
-    write_statement(
-        silver_root / "TESTCO" / "balance_sheet.csv",
-        [
-            {
-                "date": "2024-12-31",
-                "Total Assets": "not-a-number",
-                "Total Liabilities": "200",
-            }
-        ],
-    )
+    write_valid_silver_files(company_dir)
 
-    monkeypatch.setenv("FINANCIAL_SILVER_DIR", str(silver_root))
-    loader = DatabaseLoader(silver_dir=str(silver_root))
+    # Replace the balance sheet with a CSV containing no data rows.
+    pd.DataFrame(
+        columns=["Total Assets"]
+    ).to_csv(company_dir / "balance_sheet.csv")
 
-    assert loader._load_company_data("TESTCO") is False
-    assert query_counts("TESTCO") == (0, 0)
+    loader = DatabaseLoader(silver_dir=str(silver_dir))
+
+    assert loader.load_batch(["TEST"]) == ["TEST"]
+
+    session = db_manager.get_session()
+    try:
+        assert session.query(Company).filter_by(ticker="TEST").count() == 0
+        assert session.query(FinancialStatement).count() == 0
+    finally:
+        session.close()
+
+
+def test_all_missing_statement_rolls_back_entire_load(
+    fresh_db, tmp_path
+):
+    silver_dir = tmp_path / "silver"
+    company_dir = silver_dir / "TEST"
+    company_dir.mkdir(parents=True)
+
+    write_valid_silver_files(company_dir)
+
+    # The file has a row, but its financial value is missing.
+    pd.DataFrame(
+        {"Total Assets": [float("nan")]},
+        index=["2024-03-31"],
+    ).to_csv(company_dir / "balance_sheet.csv")
+
+    loader = DatabaseLoader(silver_dir=str(silver_dir))
+
+    assert loader.load_batch(["TEST"]) == ["TEST"]
+
+    session = db_manager.get_session()
+    try:
+        assert session.query(Company).filter_by(ticker="TEST").count() == 0
+        assert session.query(FinancialStatement).count() == 0
+    finally:
+        session.close()
+
+
+def test_failure_in_last_statement_rolls_back_earlier_statements(
+    fresh_db, tmp_path
+):
+    silver_dir = tmp_path / "silver"
+    company_dir = silver_dir / "TEST"
+    company_dir.mkdir(parents=True)
+
+    write_valid_silver_files(company_dir)
+
+    # Income statement and balance sheet are valid; cash flow is empty.
+    pd.DataFrame(
+        columns=["Free Cash Flow"]
+    ).to_csv(company_dir / "cashflow.csv")
+
+    loader = DatabaseLoader(silver_dir=str(silver_dir))
+
+    assert loader.load_batch(["TEST"]) == ["TEST"]
+
+    session = db_manager.get_session()
+    try:
+        assert session.query(Company).filter_by(ticker="TEST").count() == 0
+        assert session.query(FinancialStatement).count() == 0
+    finally:
+        session.close()

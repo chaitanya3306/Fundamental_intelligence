@@ -1,7 +1,7 @@
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy import select
 
-from sqlalchemy import Column, Date, Integer, String, Float, ForeignKey, DateTime
+from sqlalchemy import Column, Date, Integer, String, Float, ForeignKey, DateTime,UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 Base=declarative_base()
@@ -25,6 +25,21 @@ class Company(Base):
 # it stores the actual variable data or numbers
 class FinancialStatement(Base):
     __tablename__ = 'financial_statements'
+
+
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "date",
+            "statement_type",
+            "metric_name",
+            name="uq_financial_statement_observation",
+        ),
+    )
+
+
+
+
     statement_id=Column(Integer,primary_key=True,autoincrement=True)
     company_id=Column(Integer,ForeignKey('companies.company_id'))
     date=Column(Date,nullable=False,index=True)

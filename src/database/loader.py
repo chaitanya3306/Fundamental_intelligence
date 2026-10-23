@@ -1,4 +1,5 @@
 """Load normalized Silver-layer statements into the relational Gold layer."""
+import csv
 import logging
 import math
 import os
@@ -8,8 +9,9 @@ from typing import List
 
 import pandas as pd
 
+from datetime import datetime
 from .models import Company, FinancialStatement
-from .session import db_manager
+from src.database.session import db_manager
 
 logger = logging.getLogger(__name__)
 STATEMENTS = ("income_statement", "balance_sheet", "cashflow")
@@ -27,6 +29,8 @@ class DatabaseLoader:
         if company is None:
             company = Company(ticker=symbol)
             session.add(company)
+
+
             session.flush()
         return company.company_id
 
@@ -59,9 +63,19 @@ class DatabaseLoader:
 
     def _load_statement(self, session, df: pd.DataFrame, company_id: int, statement_type: str) -> int:
         """Load Silver format: date index, one column per financial metric."""
+        # Validate reporting dates: ensure they are parsable and unique.
+        try:
+            # Attempt to convert the entire index to datetime; this will raise on unparsable values.
+            pd.to_datetime(df.index, errors="raise")
+        except Exception as e:
+            raise ValueError(f"Invalid reporting date in {statement_type}: {e}")
+        # Reject duplicate reporting dates.
+        if df.index.duplicated().any():
+            raise ValueError(f"Duplicate reporting dates in {statement_type}")
         loaded = 0
         for date_value, row in df.iterrows():
-            report_date = pd.to_datetime(date_value, errors="raise").date()
+
+            report_date = datetime.strptime(str(date_value), "%Y-%m-%d").date()
             for metric_name, raw_value in row.items():
                 if pd.isna(raw_value):
                     continue
@@ -97,11 +111,37 @@ class DatabaseLoader:
             loaded = 0
             for statement_type in STATEMENTS:
                 path = folder / f"{statement_type}.csv"
+                # Detect duplicate metric column names in the CSV header (excluding the 'date' column).
+
+                with path.open("r", newline="", encoding="utf-8") as f:
+                    header = next(csv.reader(f))
+
+                if not header or header[0].strip().lower() != "date":
+                    raise ValueError(f"First CSV column must be 'date': {path}")
+
+                metric_names = [name.strip() for name in header[1:]]
+
+                if any(not name for name in metric_names):
+                    raise ValueError(f"Blank metric column name in {path}")
+
+                if len(metric_names) != len(set(metric_names)):
+                    raise ValueError(f"Duplicate metric column names in {path}")
+
                 df = pd.read_csv(path, index_col=0)
+
                 if df.empty:
-                    logger.warning("Skipping empty Silver statement %s", path)
-                    continue
-                loaded += self._load_statement(session, df, company_id, statement_type)
+                    raise ValueError(f"Required Silver statement is empty: {path}")
+
+                if df.columns.duplicated().any():
+                    raise ValueError(f"Duplicate metric column names in {path}")
+
+                statement_loaded = self._load_statement(
+                    session, df, company_id, statement_type
+                )
+                # Reject a statement whose rows contain only missing values.
+                if statement_loaded == 0:
+                    raise ValueError( f"Required Silver statement contains no usable observations: {path}" )
+                loaded += statement_loaded
 
             if loaded == 0:
                 raise ValueError(f"No non-missing financial observations available for {symbol}")
