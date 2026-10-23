@@ -131,7 +131,9 @@ class DatabaseLoader:
                 if len(metric_names) != len(set(metric_names)):
                     raise ValueError(f"Duplicate metric column names in {path}")
 
-                df = pd.read_csv(path, index_col=0)
+                df = pd.read_csv(path, index_col=0,dtype=str)
+                df.index=pd.to_datetime(df.index,errors='raise').date
+
 
                 if df.empty:
                     raise ValueError(f"Required Silver statement is empty: {path}")
