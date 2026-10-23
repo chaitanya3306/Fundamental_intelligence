@@ -131,3 +131,72 @@ def test_failed_refresh_does_not_report_success_even_if_old_files_exist(
 
     assert result is False
     assert old_file.exists()
+
+# ----------------------------------------------------------------------
+# New tests for atomic publish behavior
+# ----------------------------------------------------------------------
+
+@patch("src.data_ingestion.fetch_basics.yf.Ticker")
+def test_successful_atomic_refresh_replaces_old_raw_files(
+    mock_ticker_factory, fetcher, mock_ticker, tmp_path
+):
+    """When the refresh succeeds, the new files replace any existing raw data atomically."""
+    mock_ticker_factory.return_value = mock_ticker
+
+    # Create an existing raw folder with old content.
+    symbol = "AAPL"
+    old_dir = fetcher.data_dir / symbol
+    old_dir.mkdir(parents=True)
+    (old_dir / "income_statement.csv").write_text("old_income", encoding="utf-8")
+    (old_dir / "balance_sheet.csv").write_text("old_balance", encoding="utf-8")
+    (old_dir / "cashflow.csv").write_text("old_cash", encoding="utf-8")
+
+    result = fetcher.fetch_company_data(symbol)
+
+    assert result is True
+    # The directory should still exist under the same path.
+    new_dir = fetcher.data_dir / symbol
+    assert new_dir.is_dir()
+    # Verify that each file now contains the fresh data (i.e., not the old placeholder).
+    assert "old_income" not in (new_dir / "income_statement.csv").read_text()
+    assert "old_balance" not in (new_dir / "balance_sheet.csv").read_text()
+    assert "old_cash" not in (new_dir / "cashflow.csv").read_text()
+
+@patch("src.data_ingestion.fetch_basics.yf.Ticker")
+def test_publish_failure_preserves_existing_raw_data(
+    mock_ticker_factory, fetcher, mock_ticker, tmp_path
+):
+    """If publishing the staged data fails, the original raw files remain unchanged."""
+    mock_ticker_factory.return_value = mock_ticker
+
+    symbol = "AAPL"
+    old_dir = fetcher.data_dir / symbol
+    old_dir.mkdir(parents=True)
+    old_income = old_dir / "income_statement.csv"
+    old_income.write_text("old_income", encoding="utf-8")
+    old_balance = old_dir / "balance_sheet.csv"
+    old_balance.write_text("old_balance", encoding="utf-8")
+    old_cash = old_dir / "cashflow.csv"
+    old_cash.write_text("old_cash", encoding="utf-8")
+
+    # Patch the publish step to simulate a failure after staging.
+    with patch.object(fetcher, "_publish_staged", return_value=False):
+        result = fetcher.fetch_company_data(symbol)
+
+    assert result is False
+    # The original files must be intact.
+    assert old_income.read_text() == "old_income"
+    assert old_balance.read_text() == "old_balance"
+    assert old_cash.read_text() == "old_cash"
+
+    # No new folder should have been left behind.
+    assert not any(p.name.startswith("." + symbol + "_staging_") for p in fetcher.data_dir.iterdir())
+
+
+def test_download_batch_returns_failed_symbols(fetcher, mock_ticker, mock_ticker_factory):
+    # Use the patched fetcher to simulate mixed success/failure.
+    mock_ticker_factory.return_value = mock_ticker
+    # For simplicity, let fetcher succeed for AAPL and fail for MSFT.
+    with patch.object(fetcher, "fetch_company_data", side_effect=[True, False]):
+        failures = fetcher.download_batch(["AAPL", "MSFT"])
+    assert failures == ["MSFT"]

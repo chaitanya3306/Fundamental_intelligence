@@ -3,14 +3,18 @@
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Iterable, List, Dict
 from uuid import uuid4
 
 from src.data_ingestion.fetch_basics import YFinanceFetcher
 from src.data_cleaning.cleaner import FinancialCleaner
 from src.database.loader import DatabaseLoader
+from src.database.session import db_manager
+from src.database.models import Company, FinancialStatement
+from src.pipeline.metadata import record_pipeline_run
 
 logger = logging.getLogger(__name__)
+
 
 DEFAULT_TICKERS = (
     "AAPL",
@@ -46,7 +50,8 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
         "fetch_failed": [],
         "clean_failed": [],
         "load_failed": [],
-        "stage_durations_seconds": {
+        "stage_durations_seconds":
+        {
             "fetch": 0.0,
             "clean": 0.0,
             "load": 0.0,
@@ -54,11 +59,17 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
         "duration_seconds": 0.0,
     }
 
+    result["failed_stage"] = None  # will be filled if the whole pipeline crashes
+    result["failure_reason"] = None  # same idea
+
     logger.info(
         "Pipeline started: run_id=%s requested_tickers=%s",
         run_id,
         requested,
     )
+
+    # Initialise an empty list that will hold per‑ticker audit rows.
+    company_info: List[Dict] = []
 
     try:
         if not requested:
@@ -153,12 +164,84 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
             len(result["load_failed"]),
         )
 
-        failed_tickers = (
-                set(result["fetch_failed"])
-                | set(result["clean_failed"])
-                | set(result["load_failed"])
-        )
+        # ------------------------------------------------------------------
+        # Build per‑ticker audit information for persistence
+        # ------------------------------------------------------------------
+        # Helper sets for quick lookup
+        fetch_failed_set = set(result["fetch_failed"])
+        clean_failed_set = set(result["clean_failed"])
+        load_failed_set  = set(result["load_failed"])
 
+        for ticker in requested:
+            # Determine the overall per‑ticker status
+            if ticker in fetch_failed_set:
+                status = "fetch_failed"
+                failed_stage = "fetch"
+                failure_reason = "fetcher returned False"
+            elif ticker in clean_failed_set:
+                status = "clean_failed"
+                failed_stage = "clean"
+                failure_reason = "cleaner returned False"
+            elif ticker in load_failed_set:
+                status = "load_failed"
+                failed_stage = "load"
+                failure_reason = "loader returned False"
+            else:
+                status = "success"
+                failed_stage = None
+                failure_reason = None
+
+            # Freshness fields – only meaningful for successful runs
+            last_successful_refresh = None
+            latest_reporting_period = None
+            per_statement_status: Dict | None = None
+
+            if status == "success":
+                # UTC timestamp when the ticker succeeded
+                last_successful_refresh = datetime.utcnow()
+
+                # Query the Gold layer for the newest reporting date for this ticker
+                sess = db_manager.get_session()
+                try:
+                    comp = sess.query(Company).filter(Company.ticker == ticker).one_or_none()
+                    if comp:
+                        latest = (
+                            sess.query(FinancialStatement.date)
+                            .filter(FinancialStatement.company_id == comp.company_id)
+                            .order_by(FinancialStatement.date.desc())
+                            .limit(1)
+                            .scalar()
+                        )
+                        latest_reporting_period = latest
+                finally:
+                    sess.close()
+
+                # Optional per‑statement status – we know the cleaner succeeded for all three
+                per_statement_status = {
+                    "income_statement": "ok",
+                    "balance_sheet": "ok",
+                    "cashflow": "ok",
+                }
+
+            company_info.append({
+                "ticker": ticker,
+                "status": status,
+                "failed_stage": failed_stage,
+                "failure_reason": failure_reason,
+                "last_successful_refresh": last_successful_refresh,
+                "latest_reporting_period": latest_reporting_period,
+                "per_statement_status": per_statement_status,
+            })
+
+
+        # ------------------------------------------------------------------
+        # Determine overall pipeline status based on per‑ticker failures
+        # ------------------------------------------------------------------
+        failed_tickers = (
+            set(result["fetch_failed"])
+            | set(result["clean_failed"])
+            | set(result["load_failed"])
+        )
         if not failed_tickers:
             result["status"] = "success"
         elif set(requested).issubset(failed_tickers):
@@ -166,7 +249,12 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
         else:
             result["status"] = "partial_failure"
 
-        return result
+
+
+
+
+
+
 
     finally:
         result["completed_at"] = utc_now()
@@ -180,6 +268,24 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
             result["duration_seconds"],
         )
         logger.info("Pipeline execution report: %s", result)
+
+        # ------------------------------------------------------------------
+        # Persist the execution metadata (run + per‑ticker rows)
+        # ------------------------------------------------------------------
+        try:
+            record_pipeline_run(
+                run_id=run_id,
+                started_at=result["started_at"],
+                completed_at=result["completed_at"],
+                overall_status=result["status"],
+                failed_stage=result.get("failed_stage"),
+                failure_reason=result.get("failure_reason"),
+                duration_seconds=result["duration_seconds"],
+                company_rows=company_info,
+            )
+        except Exception as persist_exc:
+            return result
+
 
 def main() -> None:
     logging.basicConfig(
