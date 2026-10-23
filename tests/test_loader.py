@@ -150,17 +150,17 @@ def test_loading_same_data_twice_does_not_duplicate_rows(
     pd.DataFrame(
         {"Total Revenue": [1000.0]},
         index=["2024-03-31"],
-    ).to_csv(company_dir / "income_statement.csv")
+    ).rename_axis("date").to_csv(company_dir / "income_statement.csv")
 
     pd.DataFrame(
         {"Total Assets": [5000.0]},
         index=["2024-03-31"],
-    ).to_csv(company_dir / "balance_sheet.csv")
+    ).rename_axis("date").to_csv(company_dir / "balance_sheet.csv")
 
     pd.DataFrame(
         {"Free Cash Flow": [300.0]},
         index=["2024-03-31"],
-    ).to_csv(company_dir / "cashflow.csv")
+    ).rename_axis("date").to_csv(company_dir / "cashflow.csv")
 
     monkeypatch.setenv("FINANCIAL_SILVER_DIR", str(silver_dir))
     loader = DatabaseLoader()

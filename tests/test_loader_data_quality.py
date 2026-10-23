@@ -267,3 +267,19 @@ def test_blank_metric_header_is_rejected(
 
     assert loader._load_company_data("TESTCO") is False
     assert database_counts() == (0, 0)
+
+
+def test_explicit_silver_dir_takes_precedence_over_environment(
+    tmp_path, monkeypatch
+):
+    explicit_dir = tmp_path / "explicit_silver"
+    environment_dir = tmp_path / "environment_silver"
+
+    monkeypatch.setenv(
+        "FINANCIAL_SILVER_DIR",
+        str(environment_dir),
+    )
+
+    loader = DatabaseLoader(silver_dir=str(explicit_dir))
+
+    assert loader.silver_dir == str(explicit_dir)

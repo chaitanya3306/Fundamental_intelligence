@@ -21,8 +21,12 @@ class DatabaseLoader:
     # Kept as a compatibility surface for existing tests and callers.
     model = SimpleNamespace(Company=Company, FinancialStatement=FinancialStatement)
 
-    def __init__(self, silver_dir: str = "data/silver"):
-        self.silver_dir = os.getenv("FINANCIAL_SILVER_DIR", silver_dir)
+    def __init__(self, silver_dir: str | None = None):
+        self.silver_dir = (
+            silver_dir
+            if silver_dir is not None
+            else os.getenv("FINANCIAL_SILVER_DIR", "data/silver")
+        )
 
     def _get_or_create_company(self, session, symbol: str) -> int:
         company = session.query(Company).filter(Company.ticker == symbol).first()

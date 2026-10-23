@@ -408,3 +408,123 @@ def test_loader_rejects_incomplete_silver_dataset(tmp_path, monkeypatch):
 
     assert company_count == 0
     assert statement_count == 0
+
+
+def test_duplicate_reporting_dates_are_rejected(tmp_path):
+    raw_dir = tmp_path / "raw" / "DUPDATE"
+    raw_dir.mkdir(parents=True)
+    silver_dir = tmp_path / "silver"
+
+    write_csv(
+        raw_dir / "income_statement.csv",
+        rows=[{"Metric": "Total Revenue", "2024-01-01": "100",
+               "2024-01-01_dup": "200"}],
+        header=["Metric", "2024-01-01", "2024-01-01_dup"],
+    )
+
+    write_csv(
+        raw_dir / "balance_sheet.csv",
+        rows=[
+            {"Metric": "Total Assets", "2024-01-01": "500"},
+            {"Metric": "Total Liabilities Net Minority Interest",
+             "2024-01-01": "200"},
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    write_csv(
+        raw_dir / "cashflow.csv",
+        rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
+        header=["Metric", "2024-01-01"],
+    )
+
+    # Replace the second date column with the same reporting date.
+    income_path = raw_dir / "income_statement.csv"
+    income_df = pd.DataFrame(
+        {"2024-01-01": [100], "2024-01-01.1": [200]},
+        index=["Total Revenue"],
+    )
+    income_df.to_csv(income_path)
+
+    cleaner = FinancialCleaner(
+        raw_dir=str(tmp_path / "raw"),
+        silver_dir=str(silver_dir),
+    )
+
+    assert cleaner.process_company("DUPDATE") is False
+    assert not (silver_dir / "DUPDATE").exists()
+
+    def test_duplicate_metric_names_are_rejected(tmp_path):
+        raw_dir = tmp_path / "raw" / "DUPMETRIC"
+        raw_dir.mkdir(parents=True)
+        silver_dir = tmp_path / "silver"
+
+        with (raw_dir / "income_statement.csv").open(
+                "w", newline="", encoding="utf-8"
+        ) as file:
+            writer = csv.writer(file)
+            writer.writerow(["Metric", "2024-01-01"])
+            writer.writerow(["Total Revenue", "100"])
+            writer.writerow(["Total Revenue", "200"])
+
+        write_csv(
+            raw_dir / "balance_sheet.csv",
+            rows=[
+                {"Metric": "Total Assets", "2024-01-01": "500"},
+                {"Metric": "Total Liabilities Net Minority Interest",
+                 "2024-01-01": "200"},
+            ],
+            header=["Metric", "2024-01-01"],
+        )
+
+        write_csv(
+            raw_dir / "cashflow.csv",
+            rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
+            header=["Metric", "2024-01-01"],
+        )
+
+        cleaner = FinancialCleaner(
+            raw_dir=str(tmp_path / "raw"),
+            silver_dir=str(silver_dir),
+        )
+
+        assert cleaner.process_company("DUPMETRIC") is False
+        assert not (silver_dir / "DUPMETRIC").exists()
+
+    @pytest.mark.parametrize("bad_value", ["inf", "-inf"])
+    def test_infinite_financial_values_are_rejected(
+            tmp_path, bad_value
+    ):
+        raw_dir = tmp_path / "raw" / "INFCO"
+        raw_dir.mkdir(parents=True)
+        silver_dir = tmp_path / "silver"
+
+        write_csv(
+            raw_dir / "income_statement.csv",
+            rows=[{"Metric": "Total Revenue", "2024-01-01": bad_value}],
+            header=["Metric", "2024-01-01"],
+        )
+
+        write_csv(
+            raw_dir / "balance_sheet.csv",
+            rows=[
+                {"Metric": "Total Assets", "2024-01-01": "500"},
+                {"Metric": "Total Liabilities Net Minority Interest",
+                 "2024-01-01": "200"},
+            ],
+            header=["Metric", "2024-01-01"],
+        )
+
+        write_csv(
+            raw_dir / "cashflow.csv",
+            rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
+            header=["Metric", "2024-01-01"],
+        )
+
+        cleaner = FinancialCleaner(
+            raw_dir=str(tmp_path / "raw"),
+            silver_dir=str(silver_dir),
+        )
+
+        assert cleaner.process_company("INFCO") is False
+        assert not (silver_dir / "INFCO").exists()
