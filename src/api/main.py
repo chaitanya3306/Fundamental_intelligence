@@ -7,12 +7,14 @@ from src.risk_engine.red_flags import RedFlagEngine
 from src.valuation.valuation import ValuationEngine
 
 # Import the *new* response schemas that match the actual payloads
-from src.api.schemas import (
+from src.database.schemas import (
     GrowthReportResponse,
     RiskAuditResponse,
     RelativeValuationResponse,
     DCFValuationResponse,
 )
+
+from typing import List, Dict, Any
 
 app = FastAPI()
 
@@ -94,6 +96,25 @@ async def get_relative_valuation(symbol: str):
 # ---------------------------------------------------------------------
 # 4️⃣  Discounted‑cash‑flow (intrinsic) endpoint
 # ---------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
+# 📈  Timeseries endpoint (used by the dashboard)
+# ---------------------------------------------------------------------
+@app.get("/timeseries/{symbol}", response_model=List[Dict[str, Any]])
+async def get_timeseries(symbol: str, metric: str):
+    """Return a historical series for *metric* of *symbol*.
+
+    The service layer returns a pandas ``Series`` indexed by ``datetime``.
+    We convert it to a list of ``{"date": "YYYY‑MM‑DD", "value": float}`` so
+    the frontend can render a line chart.
+    """
+    series = metrics_engine.get_metric_series(symbol, metric)
+    if series.empty:
+        return []
+    # pandas index may be either ``Timestamp`` objects or plain ``date``
+    data = [{"date": str(idx.date()) if hasattr(idx, "date") else str(idx), "value": float(val)}
+            for idx, val in zip(series.index, series.values)]
+    return clean_nan(data)
 @app.get("/intrinsic/{symbol}", response_model=DCFValuationResponse)
 async def get_intrinsic_value(
     symbol: str,
