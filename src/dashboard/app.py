@@ -2,6 +2,10 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
+import os
+API_HOST = os.getenv("API_HOST", "127.0.0.1")
+API_PORT = os.getenv("API_PORT", "8000")
+BASE_URL = f"http://{API_HOST}:{API_PORT}"
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
@@ -19,7 +23,7 @@ def fetch_api_data(endpoint: str, symbol: str, params: dict | None = None):
     (or ``None`` on failure) and ``error`` is a string describing any problem.
     """
     try:
-        url = f"http://127.0.0.1:8000/{endpoint}/{symbol}"
+        url = f"{BASE_URL}/{endpoint}/{symbol}"
         if params:
             query = "&".join([f"{k}={v}" for k, v in params.items()])
             url = f"{url}?{query}"
@@ -112,13 +116,24 @@ if selected_ticker:
     st.subheader("📈 Historical Performance")
     # Fetch series for revenue and net income (if available)
     def fetch_series(metric_name):
+        """
+        Retrieve a time‑series for ``metric_name``.
+        Returns a pandas DataFrame or ``None`` if the API does not supply data
+        in the expected list format. This guards against the API returning a
+        dict (e.g. a 404 error) which would otherwise raise a pandas
+        ``ValueError``.
+        """
         data, err = fetch_api_data("timeseries", selected_ticker, params={"metric": metric_name})
         if err or not data:
+            return None
+        # If the API erroneously returns a dict (e.g. {"detail": "..."}), treat as no data.
+        if isinstance(data, dict):
             return None
         # Expect a list of {"date": "YYYY-MM-DD", "value": number}
         df = pd.DataFrame(data)
         if df.empty:
             return None
+        # Convert the "date" column to proper date objects.
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df = df.sort_values("date")
         return df
