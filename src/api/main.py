@@ -14,7 +14,11 @@ from src.database.schemas import (
     DCFValuationResponse,
 )
 
-from typing import List, Dict, Any
+# Pipeline runner import
+from src.pipeline.run_pipeline import run_pipeline
+
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
 
 app = FastAPI()
 
@@ -171,3 +175,25 @@ def clean_nan(obj):
     elif isinstance(obj, float) and math.isnan(obj):
         return None
     return obj
+
+# ---------------------------------------------------------------------
+# 🔄  Pipeline refresh endpoint
+# ---------------------------------------------------------------------
+
+class RefreshRequest(BaseModel):
+    tickers: Optional[List[str]] = None
+
+@app.post("/refresh", response_model=dict)
+async def refresh_pipeline_endpoint(request: RefreshRequest):
+    """Trigger a full data‑pipeline execution.
+
+    If ``request.tickers`` is provided, the pipeline runs only for those tickers;
+    otherwise it uses the default ticker list defined in ``run_pipeline``.
+    The endpoint returns the same execution report dict that ``run_pipeline``
+    produces.
+    """
+    if request.tickers:
+        result = run_pipeline(request.tickers)
+    else:
+        result = run_pipeline()
+    return result
