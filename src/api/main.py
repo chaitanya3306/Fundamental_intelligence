@@ -7,7 +7,7 @@ from src.risk_engine.red_flags import RedFlagEngine
 from src.valuation.valuation import ValuationEngine
 
 # Import the *new* response schemas that match the actual payloads
-from src.database.schemas import (
+from src.api.schemas import (
     GrowthReportResponse,
     RiskAuditResponse,
     RelativeValuationResponse,

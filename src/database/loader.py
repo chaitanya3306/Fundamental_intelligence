@@ -12,7 +12,12 @@ import pandas as pd
 from datetime import datetime
 from .models import Company, FinancialStatement
 from src.database.session import db_manager
+from datetime import datetime, timezone
 
+from src.data_validation.schemas import (
+    DataStatus,
+    FinancialObservationSchema,
+)
 logger = logging.getLogger(__name__)
 STATEMENTS = ("income_statement", "balance_sheet", "cashflow")
 
@@ -79,18 +84,56 @@ class DatabaseLoader:
         loaded = 0
         for date_value, row in df.iterrows():
 
-            report_date = datetime.strptime(str(date_value), "%Y-%m-%d").date()
+            report_date = datetime.strptime(
+                str(date_value), "%Y-%m-%d"
+            ).date()
+
             for metric_name, raw_value in row.items():
+
+                # Missing observations are intentionally not loaded.
                 if pd.isna(raw_value):
                     continue
+
                 value = float(raw_value)
+
+                # Existing numeric reliability check.
                 if not math.isfinite(value):
                     raise ValueError(
-                        f"Non-finite value for {statement_type}.{metric_name} on {report_date}"
+                        f"Non-finite value for "
+                        f"{statement_type}.{metric_name} on {report_date}"
                     )
-                self._upsert_statement(
-                    session, company_id, statement_type, report_date, str(metric_name), value
+
+                metric_name = str(metric_name).strip()
+
+                if not metric_name:
+                    raise ValueError(
+                        f"Blank metric name in {statement_type} "
+                        f"for {report_date}"
+                    )
+
+                # Validate the observation against the data contract.
+                observation = FinancialObservationSchema.model_validate(
+                    {
+                        "company_id": company_id,
+                        "statement_type": statement_type,
+                        "reporting_date": report_date,
+                        "metric_name": metric_name,
+                        "value": value,
+                        "status": DataStatus.REPORTED,
+                        "ingested_at": datetime.now(timezone.utc),
+                    }
                 )
+
+                # The validated observation is now passed to the database layer.
+                self._upsert_statement(
+                    session,
+                    observation.company_id,
+                    observation.statement_type.value,
+                    observation.reporting_date,
+                    observation.metric_name,
+                    observation.value,
+                )
+
                 loaded += 1
         return loaded
 
