@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from sqlalchemy import Column, Date, Integer, String, Float, ForeignKey, DateTime, UniqueConstraint, JSON, Text
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime
+from datetime import datetime,timezone
 Base=declarative_base()
 
 
@@ -45,6 +45,18 @@ class FinancialStatement(Base):
     statement_type=Column(String,nullable=False)
     metric_name=Column(String,nullable=False)
     value=Column(Float,nullable=False)
+
+    ingested_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    ingestion_run_id = Column(
+        String,
+        ForeignKey("pipeline_runs.run_id"),
+        nullable=True,
+    )
+    source = Column(String, nullable=False, default="yfinance")
 
     company=relationship("Company", back_populates="statements")
 

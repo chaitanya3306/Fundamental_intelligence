@@ -26,12 +26,13 @@ class DatabaseLoader:
     # Kept as a compatibility surface for existing tests and callers.
     model = SimpleNamespace(Company=Company, FinancialStatement=FinancialStatement)
 
-    def __init__(self, silver_dir: str | None = None):
+    def __init__(self, silver_dir: str | None = None,ingestion_run_id:str|None = None,):
         self.silver_dir = (
             silver_dir
             if silver_dir is not None
             else os.getenv("FINANCIAL_SILVER_DIR", "data/silver")
         )
+        self.ingestion_run_id=ingestion_run_id
 
     def _get_or_create_company(self, session, symbol: str) -> int:
         company = session.query(Company).filter(Company.ticker == symbol).first()
@@ -44,8 +45,15 @@ class DatabaseLoader:
         return company.company_id
 
     def _upsert_statement(
-        self, session, company_id: int, statement_type: str,
-        report_date, metric_name: str, value: float
+        self, session,
+            company_id: int,
+            statement_type: str,
+            report_date,
+            metric_name: str,
+            value: float,
+            ingested_at: datetime,
+            ingestion_run_id: str | None,
+            source: str,
     ) -> None:
         existing = (
             session.query(FinancialStatement)
@@ -59,6 +67,9 @@ class DatabaseLoader:
         )
         if existing is not None:
             existing.value = value
+            existing.ingested_at = ingested_at
+            existing.ingestion_run_id = ingestion_run_id
+            existing.source = source
         else:
             session.add(
                 FinancialStatement(
@@ -67,6 +78,9 @@ class DatabaseLoader:
                     statement_type=statement_type,
                     metric_name=metric_name,
                     value=value,
+                    ingested_at=ingested_at,
+                    ingestion_run_id=ingestion_run_id,
+                    source=source,
                 )
             )
 
@@ -121,6 +135,7 @@ class DatabaseLoader:
                         "value": value,
                         "status": DataStatus.REPORTED,
                         "ingested_at": datetime.now(timezone.utc),
+                        "ingestion_run_id": self.ingestion_run_id,
                     }
                 )
 
@@ -132,6 +147,9 @@ class DatabaseLoader:
                     observation.reporting_date,
                     observation.metric_name,
                     observation.value,
+                    observation.ingested_at,
+                    observation.ingestion_run_id,
+                    observation.source,
                 )
 
                 loaded += 1

@@ -11,7 +11,7 @@ from src.data_cleaning.cleaner import FinancialCleaner
 from src.database.loader import DatabaseLoader
 from src.database.session import db_manager
 from src.database.models import Company, FinancialStatement
-from src.pipeline.metadata import record_pipeline_run
+from src.pipeline.metadata import record_pipeline_run,start_pipeline_run
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,15 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
 
     # Initialise an empty list that will hold per‑ticker audit rows.
     company_info: List[Dict] = []
+
+    # Create the parent audit row before FinancialStatement rows
+    # reference this run_id.
+    start_pipeline_run(
+        run_id=run_id,
+        started_at=started_at,
+    )
+
+
 
     try:
         if not requested:
@@ -144,7 +153,7 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
         stage_start = time.perf_counter()
 
         try:
-            loader = DatabaseLoader()
+            loader = DatabaseLoader(ingestion_run_id=run_id)
             result["load_failed"] = loader.load_batch(cleaned) or []
         except Exception:
             logger.exception(
@@ -284,7 +293,11 @@ def run_pipeline(tickers: Iterable[str] = DEFAULT_TICKERS) -> dict:
                 company_rows=company_info,
             )
         except Exception as persist_exc:
-            return result
+            logger.exception(
+                "Failed to persist pipeline metadata: run_id=%s",
+                run_id,
+            )
+    return result
 
 
 def main() -> None:
