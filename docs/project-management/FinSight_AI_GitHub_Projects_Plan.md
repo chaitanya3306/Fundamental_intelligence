@@ -378,7 +378,7 @@ Act as a senior data engineer, backend engineer, financial-data analyst, and pat
 - Do not weaken/delete tests to manufacture a green suite.
 - Separate unit tests, integration tests, and tests requiring external services.
 - If a command cannot run, report that clearly.
-- Report exact commands and actual pass/fail counts.
+- Report exact pass/fail counts.
 
 ## Financial correctness
 - Keep reported, normalized, derived, forecast, assumption, and valuation values distinct.
@@ -439,7 +439,3 @@ Do not claim completion unless acceptance criteria have evidence. Do not update 
 6. Commit locally with a meaningful message after review.
 7. Add test evidence and outcome to the issue.
 8. Move to `Done` only when acceptance criteria are met; create follow-up issues for discovered work.
-
-## GitHub Projects setup note
-
-The connected GitHub actions available here can create repository issues and files, but do not expose operations to create/configure GitHub Projects V2 boards, custom fields, or add issues to a Projects V2 board. Create the board in GitHub's UI and add the issues via its Add item control. Do not assume a board exists until created.
