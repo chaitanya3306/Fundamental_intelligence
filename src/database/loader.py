@@ -134,6 +134,7 @@ class DatabaseLoader:
                         "metric_name": metric_name,
                         "value": value,
                         "status": DataStatus.REPORTED,
+                        "source": "yfinance",
                         "ingested_at": datetime.now(timezone.utc),
                         "ingestion_run_id": self.ingestion_run_id,
                     }
