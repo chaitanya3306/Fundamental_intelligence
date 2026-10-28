@@ -9,7 +9,7 @@ import tempfile
 import pandas as pd
 
 from src.data_validation.validator import FinancialValidator
-
+import numpy as np
 logger = logging.getLogger(__name__)
 
 STATEMENTS = ("income_statement", "balance_sheet", "cashflow")
@@ -33,9 +33,17 @@ class FinancialCleaner:
         result = df.transpose().copy()
         result.index = pd.to_datetime(result.index, errors="raise").date
         result.index.name = "date"
+        result=result.sort_index()
         result.columns = result.columns.astype(str).str.strip()
         for column in result.columns:
             result[column] = pd.to_numeric(result[column], errors="raise")
+            values=result[column].dropna()
+            if not np.isfinite(values).all():
+                raise ValueError(
+                    f"Non-finite values found in financial metric: {column}"
+                )
+
+
         return result
 
     def process_company(self, symbol: str) -> bool:

@@ -5,7 +5,7 @@ import os
 from typing import List,Tuple
 
 
-
+import numpy as np
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -22,6 +22,34 @@ class FinancialValidator:
         if df.empty:
             return False,"File is Empty"
         return True,""
+
+    def _check_reporting_periods(self,df:pd.DataFrame)->Tuple[bool,str]:
+    #     in this we are checking is the reporting periods are empty or duplicaetd or no
+        reporting_periods=pd.Index(df.columns)
+        parsed_periods = pd.to_datetime(
+            reporting_periods,
+            errors="coerce",
+        )
+
+        invalid_periods = parsed_periods.isna()
+
+        if invalid_periods.any():
+            bad_periods = reporting_periods[invalid_periods].tolist()
+
+            return False, f"Invalid reporting periods found: {bad_periods}"
+
+        if parsed_periods.duplicated().any():
+            duplicate_periods = parsed_periods[
+                parsed_periods.duplicated(keep=False)
+            ].tolist()
+
+            return False, (
+                f"Duplicate reporting periods found: {duplicate_periods}"
+            )
+
+        return True, ""
+
+
 
     def _check_columns(self,df:pd.DataFrame,statement:str)->Tuple[bool,str]:
         if statement not in self.required_columns:
@@ -64,6 +92,70 @@ class FinancialValidator:
 
         return True, ""
 
+    def _check_metric_names(
+            self,
+            df: pd.DataFrame,
+    ) -> Tuple[bool, str]:
+
+        metric_names = df.index.astype(str).str.strip()
+
+        blank_names = metric_names == ""
+
+        if blank_names.any():
+            return False, "Blank financial metric names found"
+
+        duplicate_names = metric_names[
+            metric_names.duplicated(keep=False)
+        ].unique().tolist()
+
+        if duplicate_names:
+            return False, (
+                f"Duplicate financial metric names found: {duplicate_names}"
+            )
+
+        return True, ""
+
+    def _check_infinite_values(
+            self,
+            df: pd.DataFrame,
+    ) -> Tuple[bool, str]:
+
+        numeric_df = df.apply(
+            pd.to_numeric,
+            errors="coerce",
+        )
+
+        infinite_mask = np.isinf(numeric_df)
+
+        if infinite_mask.any().any():
+            infinite_locations = np.where(infinite_mask)
+
+            return False, (
+                f"Infinite values found at positions: "
+                f"{list(zip(infinite_locations[0], infinite_locations[1]))}"
+            )
+
+        return True, ""
+
+    def _check_structure(
+            self,
+            df: pd.DataFrame,
+    ) -> Tuple[bool, str]:
+
+        if df.index.isna().any():
+            return False, "Missing financial metric names found"
+
+        if len(df.index) == 0:
+            return False, "No financial metrics found"
+
+        if len(df.columns) == 0:
+            return False, "No reporting periods found"
+
+        if df.columns.isna().any():
+            return False, "Missing reporting period columns found"
+
+        return True, ""
+
     def validate_file(self,file_path:str,statement:str)->bool:
         #in this file we are checking all the constraints together on any file
         try:
@@ -75,12 +167,55 @@ class FinancialValidator:
                 logger.warning(f"validation failed empty file detected : {file_path}:{msg}")
                 return False
 
+            is_ok, msg = self._check_reporting_periods(df)
+
+            if not is_ok:
+                logger.warning(
+                    "Validation failed for %s: %s",
+                    file_path,
+                    msg,
+                )
+                return False
+
+
+            is_ok, msg = self._check_metric_names(df)
+
+            if not is_ok:
+                logger.warning(
+                    "Validation failed for %s: %s",
+                    file_path,
+                    msg,
+                )
+                return False
+
+            is_ok, msg = self._check_structure(df)
+
+            if not is_ok:
+                logger.warning(
+                    "Validation failed for %s: %s",
+                    file_path,
+                    msg,
+                )
+                return False
+
+
             is_ok,msg=self._check_columns(df,statement)
             if not is_ok :
                 logger.warning(f"validation failed missing features detected :{file_path} : {msg}")
                 return False
 
+
+
             is_ok, msg = self._check_numeric_values(df, statement)
+            if not is_ok:
+                logger.warning(
+                    "Validation failed for %s: %s",
+                    file_path,
+                    msg,
+                )
+                return False
+
+            is_ok, msg = self._check_infinite_values(df)
             if not is_ok:
                 logger.warning(
                     "Validation failed for %s: %s",

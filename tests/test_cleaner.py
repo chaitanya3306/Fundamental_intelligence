@@ -528,3 +528,136 @@ def test_duplicate_reporting_dates_are_rejected(tmp_path):
 
         assert cleaner.process_company("INFCO") is False
         assert not (silver_dir / "INFCO").exists()
+
+# ======================================================================
+# 7. Test: reporting periods are sorted chronologically in Silver.
+# ======================================================================
+
+def test_reporting_periods_are_sorted_chronologically(tmp_path):
+    raw_dir = tmp_path / "raw" / "SORTCO"
+    raw_dir.mkdir(parents=True)
+
+    silver_dir = tmp_path / "silver"
+
+    # Deliberately provide reporting periods out of chronological order.
+    write_csv(
+        raw_dir / "income_statement.csv",
+        rows=[
+            {
+                "Metric": "Total Revenue",
+                "2024-12-31": "300",
+                "2024-03-31": "100",
+                "2024-09-30": "200",
+            }
+        ],
+        header=[
+            "Metric",
+            "2024-12-31",
+            "2024-03-31",
+            "2024-09-30",
+        ],
+    )
+
+    write_csv(
+        raw_dir / "balance_sheet.csv",
+        rows=[
+            {"Metric": "Total Assets", "2024-03-31": "500"},
+            {
+                "Metric": "Total Liabilities Net Minority Interest",
+                "2024-03-31": "200",
+            },
+        ],
+        header=["Metric", "2024-03-31"],
+    )
+
+    write_csv(
+        raw_dir / "cashflow.csv",
+        rows=[
+            {"Metric": "Free Cash Flow", "2024-03-31": "50"}
+        ],
+        header=["Metric", "2024-03-31"],
+    )
+
+    cleaner = FinancialCleaner(
+        raw_dir=str(tmp_path / "raw"),
+        silver_dir=str(silver_dir),
+    )
+
+    assert cleaner.process_company("SORTCO") is True
+
+    silver_file = silver_dir / "SORTCO" / "income_statement.csv"
+    df = pd.read_csv(silver_file, index_col=0)
+
+    # Dates should be ascending, oldest to newest.
+    actual_dates = pd.to_datetime(df.index)
+
+    assert actual_dates.is_monotonic_increasing
+    assert actual_dates.is_unique
+
+
+
+# ======================================================================
+# 8. Test: cleaned Silver values are numeric and contain no infinities.
+# ======================================================================
+
+def test_cleaned_silver_values_are_numeric_and_finite(tmp_path):
+    raw_dir = tmp_path / "raw" / "VALIDCO"
+    raw_dir.mkdir(parents=True)
+
+    silver_dir = tmp_path / "silver"
+
+    write_csv(
+        raw_dir / "income_statement.csv",
+        rows=[
+            {"Metric": "Total Revenue", "2024-01-01": "100"}
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    write_csv(
+        raw_dir / "balance_sheet.csv",
+        rows=[
+            {"Metric": "Total Assets", "2024-01-01": "500"},
+            {
+                "Metric": "Total Liabilities Net Minority Interest",
+                "2024-01-01": "200",
+            },
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    write_csv(
+        raw_dir / "cashflow.csv",
+        rows=[
+            {"Metric": "Free Cash Flow", "2024-01-01": "50"}
+        ],
+        header=["Metric", "2024-01-01"],
+    )
+
+    cleaner = FinancialCleaner(
+        raw_dir=str(tmp_path / "raw"),
+        silver_dir=str(silver_dir),
+    )
+
+    assert cleaner.process_company("VALIDCO") is True
+
+    silver_folder = silver_dir / "VALIDCO"
+
+    for statement in (
+        "income_statement",
+        "balance_sheet",
+        "cashflow",
+    ):
+        df = pd.read_csv(
+            silver_folder / f"{statement}.csv",
+            index_col=0,
+        )
+
+        # Every financial metric column should be numeric.
+        for column in df.columns:
+            assert pd.api.types.is_numeric_dtype(df[column])
+
+        # Missing values are allowed, but infinite values are not.
+        assert not df.select_dtypes(include="number").isin(
+            [float("inf"), float("-inf")]
+        ).any().any()
