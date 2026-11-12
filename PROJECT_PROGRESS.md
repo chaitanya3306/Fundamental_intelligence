@@ -49,3 +49,20 @@
 
 ## Update template
 Record date, branch/commit, requirement, files changed, behavior, exact commands, passed/failed/skipped/collected counts, evidence, limitations and next task. Never mark work complete merely because code was generated or tests were written.
+
+
+## 7. Branch verification update
+
+**Branch:** `chore/finsight-product-alignment`  
+**Verified commit:** `a7062aafb87da4211ff321670e022afe6410f8e0`  
+**GitHub Actions run:** [Tests #3](https://github.com/chaitanya3306/Fundamental_intelligence/actions/runs/43204132542)  
+**Result:** Success.
+
+- Dependency sync with `uv sync --frozen`: passed.
+- Pytest collection: 62 tests collected.
+- Full suite: 62 passed, 0 failed, 0 skipped.
+- Test runtime: 1.62 seconds.
+- Two cleaner tests previously nested inside another test were moved to module scope so pytest collects them.
+- Pipeline tests now use an isolated SQLite database per test and patch both metadata and pipeline freshness-query database references.
+
+This verifies the current test suite on the branch in GitHub Actions. It does not verify live provider access, PostgreSQL migrations against a deployed database, API startup, end-to-end UI behavior, or financial correctness beyond the assertions currently present in the tests.
