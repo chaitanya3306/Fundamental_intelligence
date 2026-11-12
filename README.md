@@ -1,49 +1,59 @@
-# 📈 AI-Powered Fundamental Analysis Intelligence Platform
+# FinSight AI
 
-An end-to-end production-grade system designed for the fundamental analysis of Indian listed companies. This platform automates the pipeline from raw financial data extraction to an interactive valuation dashboard.
+FinSight AI is a financial intelligence and fundamental-analysis application for supported US-listed companies. Its goal is to help users explore a company's business, financial statements, financial quality, historical growth and valuation.
 
-## 🎯 Project Objective
-The goal of this platform is to transform raw corporate filings and financial statements into actionable investment intelligence. By integrating data engineering, financial modeling, and automated risk detection, the system provides a comprehensive view of a company's business quality, growth trajectory, financial health, and intrinsic value.
+> **Project status:** Early implementation. The six images in `Artifacts/` are product references, not evidence that all screens or data capabilities are implemented. See [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md).
 
-## 🛠 Technology Stack
+## Product
 
-| Layer | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Language** | Python 3.11+ | Core logic and data processing |
-| **Data Processing** | Pandas, NumPy | Tabular data manipulation and numerical analysis |
-| **Database** | PostgreSQL | Relational storage for financial time-series data |
-| **ORM** | SQLAlchemy | Database abstraction and schema management |
-| **Backend API** | FastAPI | High-performance REST API for data delivery |
-| **Frontend** | Streamlit | Interactive research and valuation dashboard |
-| **Validation** | Pydantic | Data typing and schema enforcement |
-| **Visualization** | Plotly | Professional financial charting |
+Six primary pages:
+1. Home
+2. Company Overview
+3. Financial Statements
+4. Financial Quality
+5. Growth Analysis
+6. Valuation
 
-## 🏗 System Architecture
-The system follows a strict **unidirectional data pipeline** to ensure data lineage and traceability:
+See [PRODUCT_SPEC.md](PRODUCT_SPEC.md) for page requirements and acceptance standards.
 
-`External Sources` $\rightarrow$ `Ingestion` $\rightarrow$ `Validation` $\rightarrow$ `Cleaning` $\rightarrow$ `PostgreSQL` $\rightarrow$ `Analysis Engine` $\rightarrow$ `FastAPI` $\rightarrow$ `Streamlit`
+## Architecture target
 
-### Component Breakdown:
-- **Data Ingestion**: Automated fetching from official sources (NSE, BSE, SEBI).
-- **Validation & Cleaning**: Ensuring data sanity, handling missing values, and standardizing financial terms.
-- **Analysis Engine**: Calculating growth rates, profitability margins, and cash-flow quality.
-- **Risk Engine**: Automated "Red-Flag" detection based on accounting anomalies.
-- **Valuation Engine**: Implementing Relative Valuation and DCF (Discounted Cash Flow) models.
-- **Delivery Layer**: A FastAPI backend serving a Streamlit-based professional dashboard.
+`Financial/market providers → ingestion → validation → cleaning/standardization → PostgreSQL → financial analysis/services → FastAPI → Streamlit`
 
-## 🚀 Getting Started
-*(This section will be updated as we implement the deployment guide)*
+The repository already contains parts of this pipeline. See [ARCHITECTURE.md](ARCHITECTURE.md) for the audited baseline and target architecture.
 
-## 📈 Development Roadmap
-- [ ] **Phase 0**: Architecture & Setup $\checkmark$
-- [ ] **Phase 1**: Small-scale Data Collection
-- [ ] **Phase 2**: Raw Data Storage
-- [ ] **Phase 3**: Cleaning & Validation Pipeline
-- [ ] **Phase 4**: PostgreSQL Schema Design
-- [ ] **Phase 5**: Financial Metrics Engine
-- [ ] **Phase 6**: Growth & Profitability Analysis
-- [ ] **Phase 7**: Red-Flag Detection Engine
-- [ ] **Phase 8**: Valuation Engine (DCF & Relative)
-- [ ] **Phase 9**: FastAPI Backend Implementation
-- [ ] **Phase 10**: Streamlit Dashboard Development
-- [ ] **Phase 11+**: AI-Assisted Analysis & ML Integration
+## Technology direction
+
+- Python, pandas, NumPy
+- yfinance and other verified providers as appropriate
+- PostgreSQL, SQLAlchemy, Alembic
+- FastAPI, Pydantic
+- Streamlit
+- pytest
+
+Provider availability, licensing, rate limits, currency, historical coverage and freshness must be verified before presenting data as supported. The app must not fabricate missing financial or market values.
+
+## Development
+
+- [CLAUDE.md](CLAUDE.md): Claude Code working rules
+- [PRODUCT_SPEC.md](PRODUCT_SPEC.md): product requirements
+- [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md): verified current status
+- [ROADMAP.md](ROADMAP.md): sequential development plan
+- [ARCHITECTURE.md](ARCHITECTURE.md): current and target architecture
+- [DECISIONS.md](DECISIONS.md): accepted decisions
+- [Metric catalog](docs/financial/METRIC_CATALOG.md): financial definitions and calculation requirements
+
+## Local setup
+
+The project uses `uv` and `pyproject.toml`. After installing a compatible Python version and uv:
+
+```bash
+uv sync --frozen
+uv run pytest -q
+```
+
+Check the current source/configuration for the exact database environment variables and application start commands before running the API or dashboard. Do not commit credentials or local database files.
+
+## Scope
+
+The initial MVP is fundamental analysis for supported US-listed companies. WhaleWatch AI and Combined Analysis are future extensions. Automated trading, brokerage integration and ML stock prediction are not part of the current MVP.
