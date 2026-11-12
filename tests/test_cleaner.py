@@ -454,80 +454,80 @@ def test_duplicate_reporting_dates_are_rejected(tmp_path):
     assert cleaner.process_company("DUPDATE") is False
     assert not (silver_dir / "DUPDATE").exists()
 
-    def test_duplicate_metric_names_are_rejected(tmp_path):
-        raw_dir = tmp_path / "raw" / "DUPMETRIC"
-        raw_dir.mkdir(parents=True)
-        silver_dir = tmp_path / "silver"
+def test_duplicate_metric_names_are_rejected(tmp_path):
+    raw_dir = tmp_path / "raw" / "DUPMETRIC"
+    raw_dir.mkdir(parents=True)
+    silver_dir = tmp_path / "silver"
 
-        with (raw_dir / "income_statement.csv").open(
-                "w", newline="", encoding="utf-8"
-        ) as file:
-            writer = csv.writer(file)
-            writer.writerow(["Metric", "2024-01-01"])
-            writer.writerow(["Total Revenue", "100"])
-            writer.writerow(["Total Revenue", "200"])
+    with (raw_dir / "income_statement.csv").open(
+            "w", newline="", encoding="utf-8"
+    ) as file:
+        writer = csv.writer(file)
+        writer.writerow(["Metric", "2024-01-01"])
+        writer.writerow(["Total Revenue", "100"])
+        writer.writerow(["Total Revenue", "200"])
 
-        write_csv(
-            raw_dir / "balance_sheet.csv",
-            rows=[
-                {"Metric": "Total Assets", "2024-01-01": "500"},
-                {"Metric": "Total Liabilities Net Minority Interest",
-                 "2024-01-01": "200"},
-            ],
-            header=["Metric", "2024-01-01"],
-        )
+    write_csv(
+        raw_dir / "balance_sheet.csv",
+        rows=[
+            {"Metric": "Total Assets", "2024-01-01": "500"},
+            {"Metric": "Total Liabilities Net Minority Interest",
+             "2024-01-01": "200"},
+        ],
+        header=["Metric", "2024-01-01"],
+    )
 
-        write_csv(
-            raw_dir / "cashflow.csv",
-            rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
-            header=["Metric", "2024-01-01"],
-        )
+    write_csv(
+        raw_dir / "cashflow.csv",
+        rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
+        header=["Metric", "2024-01-01"],
+    )
 
-        cleaner = FinancialCleaner(
-            raw_dir=str(tmp_path / "raw"),
-            silver_dir=str(silver_dir),
-        )
+    cleaner = FinancialCleaner(
+        raw_dir=str(tmp_path / "raw"),
+        silver_dir=str(silver_dir),
+    )
 
-        assert cleaner.process_company("DUPMETRIC") is False
-        assert not (silver_dir / "DUPMETRIC").exists()
+    assert cleaner.process_company("DUPMETRIC") is False
+    assert not (silver_dir / "DUPMETRIC").exists()
 
-    @pytest.mark.parametrize("bad_value", ["inf", "-inf"])
-    def test_infinite_financial_values_are_rejected(
-            tmp_path, bad_value
-    ):
-        raw_dir = tmp_path / "raw" / "INFCO"
-        raw_dir.mkdir(parents=True)
-        silver_dir = tmp_path / "silver"
+@pytest.mark.parametrize("bad_value", ["inf", "-inf"])
+def test_infinite_financial_values_are_rejected(
+        tmp_path, bad_value
+):
+    raw_dir = tmp_path / "raw" / "INFCO"
+    raw_dir.mkdir(parents=True)
+    silver_dir = tmp_path / "silver"
 
-        write_csv(
-            raw_dir / "income_statement.csv",
-            rows=[{"Metric": "Total Revenue", "2024-01-01": bad_value}],
-            header=["Metric", "2024-01-01"],
-        )
+    write_csv(
+        raw_dir / "income_statement.csv",
+        rows=[{"Metric": "Total Revenue", "2024-01-01": bad_value}],
+        header=["Metric", "2024-01-01"],
+    )
 
-        write_csv(
-            raw_dir / "balance_sheet.csv",
-            rows=[
-                {"Metric": "Total Assets", "2024-01-01": "500"},
-                {"Metric": "Total Liabilities Net Minority Interest",
-                 "2024-01-01": "200"},
-            ],
-            header=["Metric", "2024-01-01"],
-        )
+    write_csv(
+        raw_dir / "balance_sheet.csv",
+        rows=[
+            {"Metric": "Total Assets", "2024-01-01": "500"},
+            {"Metric": "Total Liabilities Net Minority Interest",
+             "2024-01-01": "200"},
+        ],
+        header=["Metric", "2024-01-01"],
+    )
 
-        write_csv(
-            raw_dir / "cashflow.csv",
-            rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
-            header=["Metric", "2024-01-01"],
-        )
+    write_csv(
+        raw_dir / "cashflow.csv",
+        rows=[{"Metric": "Free Cash Flow", "2024-01-01": "50"}],
+        header=["Metric", "2024-01-01"],
+    )
 
-        cleaner = FinancialCleaner(
-            raw_dir=str(tmp_path / "raw"),
-            silver_dir=str(silver_dir),
-        )
+    cleaner = FinancialCleaner(
+        raw_dir=str(tmp_path / "raw"),
+        silver_dir=str(silver_dir),
+    )
 
-        assert cleaner.process_company("INFCO") is False
-        assert not (silver_dir / "INFCO").exists()
+    assert cleaner.process_company("INFCO") is False
+    assert not (silver_dir / "INFCO").exists()
 
 # ======================================================================
 # 7. Test: reporting periods are sorted chronologically in Silver.
