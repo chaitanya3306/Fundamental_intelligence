@@ -16,6 +16,8 @@ def isolated_pipeline_database(tmp_path, monkeypatch):
     manager._SessionLocal = None
     manager.create_tables()
     monkeypatch.setattr(pipeline_metadata, "db_manager", manager)
+    import src.pipeline.run_pipeline as pipeline_module
+    monkeypatch.setattr(pipeline_module, "db_manager", manager)
 
     yield
 
