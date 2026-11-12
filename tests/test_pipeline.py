@@ -1,5 +1,27 @@
 from unittest.mock import patch
 
+import pytest
+
+from src.database.session import DatabaseSession
+import src.pipeline.metadata as pipeline_metadata
+
+
+@pytest.fixture(autouse=True)
+def isolated_pipeline_database(tmp_path, monkeypatch):
+    """Give pipeline metadata tests an isolated schema per test."""
+    manager = DatabaseSession()
+    manager._engine.dispose()
+    manager.engine_url = f"sqlite:///{tmp_path / 'pipeline-test.db'}"
+    manager._engine = None
+    manager._SessionLocal = None
+    manager.create_tables()
+    monkeypatch.setattr(pipeline_metadata, "db_manager", manager)
+
+    yield
+
+    manager._engine.dispose()
+
+
 from src.pipeline.run_pipeline import run_pipeline
 
 
